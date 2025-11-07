@@ -1,6 +1,12 @@
 import express from "express";
 import cors from "cors";
-import { writeProductsToSheet, readProductsFromSheet, writeQuantitiesToSheet } from "./googleSheets.js";
+import { 
+  writeProductsToSheet, 
+  readProductsFromSheet, 
+  writeQuantitiesToSheet,
+  createInventorySheet,
+  writeQuantitiesToInventorySheet
+} from "./googleSheets.js";
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
 
 const app = express();
@@ -125,14 +131,10 @@ app.get("/api/inventory/products", async (req, res) => {
   }
 });
 
-// 🆕 💾 ЗАПИС ЗАЛИШКІВ В GOOGLE SHEETS
+// 🆕 💾 ЗАПИС ЗАЛИШКІВ В GOOGLE SHEETS (НОВИЙ АРКУШ)
 app.post("/api/inventory/save", async (req, res) => {
   try {
-    const { inventoryData } = req.body;
-    // inventoryData = [
-    //   { fridgeNumber: "1", products: [{ name: "Coca Cola", quantity: 5 }, ...] },
-    //   { fridgeNumber: "2", products: [{ name: "Coca Cola", quantity: 3 }, ...] }
-    // ]
+    const { inventoryData, inventoryDate } = req.body;
     
     if (!inventoryData || !Array.isArray(inventoryData)) {
       return res.status(400).json({ 
@@ -140,6 +142,16 @@ app.post("/api/inventory/save", async (req, res) => {
         error: "Невірний формат даних" 
       });
     }
+    
+    if (!inventoryDate) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Не вказана дата інвентаризації" 
+      });
+    }
+    
+    // Створюємо новий аркуш з датою
+    const sheetName = await createInventorySheet(inventoryDate);
     
     // Збираємо всі продукти та сумуємо однакові
     const productTotals = new Map();
@@ -162,11 +174,13 @@ app.post("/api/inventory/save", async (req, res) => {
       totalQuantity
     }));
     
-    await writeQuantitiesToSheet(quantities);
+    // Записуємо в новий аркуш
+    await writeQuantitiesToInventorySheet(sheetName, quantities);
     
     res.json({ 
       success: true, 
-      message: `✅ Залишки успішно збережено! Оновлено ${quantities.length} позицій`,
+      message: `✅ Інвентаризацію успішно збережено в аркуш "${sheetName}"! Оновлено ${quantities.length} позицій`,
+      sheetName,
       saved: quantities
     });
   } catch (error) {

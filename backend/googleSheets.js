@@ -29,14 +29,40 @@ export async function readProductsFromSheet() {
     const rows = response.data.values || [];
     
     // Перетворюємо рядки в об'єкти
-    const products = rows.map((row, index) => ({
-      rowIndex: index + 2, // +2 бо рядки починаються з 2 (1-й рядок - заголовки)
-      fridge: row[0] || "", // Колонка A - Холодильник
-      name: row[1] || "", // Колонка B - Назва
-      category: row[2] || "", // Колонка C - Категорія
-      type: row[3] || "", // Колонка D - Тип
-      quantity: row[4] || "", // Колонка E - Залишки (якщо є)
-    }));
+    const products = [];
+    
+    rows.forEach((row, index) => {
+      const fridgeValue = row[0] || "";
+      const name = row[1] || "";
+      const category = row[2] || "";
+      const type = row[3] || "";
+      const quantity = row[4] || "";
+      
+      // Якщо в колонці A записано "2,3" або "2, 3", розбиваємо на окремі холодильники
+      if (fridgeValue.includes(",")) {
+        const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
+        
+        fridgeNumbers.forEach(fridgeNum => {
+          products.push({
+            rowIndex: index + 2,
+            fridge: fridgeNum,
+            name,
+            category,
+            type,
+            quantity
+          });
+        });
+      } else {
+        products.push({
+          rowIndex: index + 2,
+          fridge: fridgeValue,
+          name,
+          category,
+          type,
+          quantity
+        });
+      }
+    });
 
     console.log(`📋 Прочитано ${products.length} продуктів з Google Sheets`);
     return products;

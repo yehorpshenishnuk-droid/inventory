@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Инвентаризация ресторана</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f7f7f7;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background-color: #eee;
+    }
+  </style>
+</head>
+<body>
+  <h1>📦 Список продуктов (из Poster)</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Название</th>
+        <th>Категория</th>
+      </tr>
+    </thead>
+    <tbody id="product-table"></tbody>
+  </table>
+
+  <script>
+    async function loadProducts() {
+      try {
+        const response = await fetch("https://inventory-duab.onrender.com/api/products");
+        const data = await response.json();
+
+        const tbody = document.getElementById("product-table");
+        tbody.innerHTML = "";
+
+        data.forEach(item => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${item.product_id}</td>
+            <td>${item.product_name}</td>
+            <td>${item.menu_category_id || item.menu_category_name || "-"}</td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (err) {
+        alert("Ошибка при загрузке данных: " + err);
+      }
+    }
+
+    loadProducts();
+  </script>
+</body>
+</html>

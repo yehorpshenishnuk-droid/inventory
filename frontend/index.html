@@ -31,6 +31,62 @@
       text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
     }
     
+    /* Модальне вікно для дати */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+    
+    .modal.active {
+      display: flex;
+    }
+    
+    .modal-content {
+      background: white;
+      padding: 40px;
+      border-radius: 20px;
+      max-width: 500px;
+      width: 90%;
+      text-align: center;
+    }
+    
+    .modal-content h2 {
+      margin-bottom: 20px;
+      color: #333;
+    }
+    
+    .modal-content input[type="date"] {
+      width: 100%;
+      padding: 15px;
+      font-size: 1.2em;
+      border: 2px solid #ddd;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .modal-content button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 15px 40px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 1.1em;
+      font-weight: bold;
+    }
+    
+    .modal-content button:hover {
+      background: #5568d3;
+    }
+    
     /* Екран вибору холодильника */
     #fridge-selector {
       display: grid;
@@ -104,6 +160,36 @@
       background: #5568d3;
     }
     
+    /* Пошук */
+    .search-box {
+      margin: 20px 0;
+      position: sticky;
+      top: 0;
+      background: white;
+      padding: 10px 0;
+      z-index: 100;
+    }
+    
+    .search-input {
+      width: 100%;
+      padding: 15px 20px;
+      font-size: 1.1em;
+      border: 2px solid #ddd;
+      border-radius: 10px;
+      transition: border-color 0.3s;
+    }
+    
+    .search-input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .search-stats {
+      margin-top: 10px;
+      color: #666;
+      font-size: 0.9em;
+    }
+    
     .product-item {
       border-bottom: 1px solid #eee;
       padding: 20px 0;
@@ -111,6 +197,17 @@
       grid-template-columns: 1fr auto 150px;
       gap: 20px;
       align-items: center;
+      transition: background 0.3s;
+    }
+    
+    .product-item.hidden {
+      display: none;
+    }
+    
+    .product-item.highlight {
+      background: #fffbeb;
+      padding: 20px 10px;
+      border-radius: 8px;
     }
     
     .product-item:last-child {
@@ -158,11 +255,17 @@
       border-radius: 8px;
       font-size: 1em;
       text-align: center;
+      transition: border-color 0.3s;
     }
     
     .quantity-input input:focus {
       outline: none;
       border-color: #667eea;
+    }
+    
+    .quantity-input input.filled {
+      border-color: #10b981;
+      background: #f0fdf4;
     }
     
     .quantity-input span {
@@ -226,17 +329,87 @@
       color: #991b1b;
     }
     
+    .message.warning {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    
     .loading {
       text-align: center;
       padding: 40px;
       color: white;
       font-size: 1.2em;
     }
+    
+    /* Модальне вікно для незаповнених позицій */
+    .unfilled-modal {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    
+    .unfilled-list {
+      text-align: left;
+      margin: 20px 0;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .unfilled-item {
+      padding: 10px;
+      background: #fef3c7;
+      margin: 5px 0;
+      border-radius: 5px;
+      border-left: 4px solid #f59e0b;
+    }
+    
+    .modal-buttons {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    
+    .modal-buttons button {
+      flex: 1;
+    }
+    
+    .btn-secondary {
+      background: #6b7280 !important;
+    }
+    
+    .btn-secondary:hover {
+      background: #4b5563 !important;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>❄️ Інвентаризація холодильників</h1>
+    
+    <!-- Модальне вікно для введення дати -->
+    <div id="date-modal" class="modal active">
+      <div class="modal-content">
+        <h2>📅 Дата інвентаризації</h2>
+        <p style="color: #666; margin-bottom: 20px;">Введіть дату проведення інвентаризації</p>
+        <input type="date" id="inventory-date" />
+        <button onclick="startInventory()">Почати інвентаризацію</button>
+      </div>
+    </div>
+    
+    <!-- Модальне вікно для незаповнених позицій -->
+    <div id="unfilled-modal" class="modal">
+      <div class="modal-content unfilled-modal">
+        <h2>⚠️ Незаповнені позиції</h2>
+        <p style="color: #666; margin-bottom: 20px;">
+          Ви не заповнили наступні позиції. Продовжити збереження?
+        </p>
+        <div id="unfilled-list" class="unfilled-list"></div>
+        <div class="modal-buttons">
+          <button class="btn-secondary" onclick="closeUnfilledModal()">Повернутись</button>
+          <button onclick="confirmSave()">Зберегти в будь-якому випадку</button>
+        </div>
+      </div>
+    </div>
     
     <div id="loading" class="loading">
       Завантаження даних...
@@ -249,6 +422,19 @@
     <div id="product-list">
       <button class="back-btn" onclick="showFridgeSelector()">← Назад до холодильників</button>
       <h2 id="current-fridge-title"></h2>
+      
+      <!-- Пошук -->
+      <div class="search-box">
+        <input 
+          type="text" 
+          class="search-input" 
+          id="search-input" 
+          placeholder="🔍 Пошук продукту (наприклад: кока, пиво, салат...)"
+          oninput="filterProducts()"
+        />
+        <div class="search-stats" id="search-stats"></div>
+      </div>
+      
       <div class="progress-bar">
         <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
       </div>
@@ -263,6 +449,24 @@
     let allFridges = [];
     let currentFridge = null;
     let inventoryData = {}; // Зберігаємо всі введені дані
+    let inventoryDate = null; // Дата інвентаризації
+    let currentProducts = []; // Поточні продукти для фільтрації
+
+    // Встановлюємо сьогоднішню дату за замовчуванням
+    document.getElementById("inventory-date").valueAsDate = new Date();
+
+    // Початок інвентаризації після введення дати
+    function startInventory() {
+      const dateInput = document.getElementById("inventory-date").value;
+      if (!dateInput) {
+        alert("Будь ласка, введіть дату інвентаризації");
+        return;
+      }
+      
+      inventoryDate = dateInput;
+      document.getElementById("date-modal").classList.remove("active");
+      loadData();
+    }
 
     // Завантаження даних при старті
     async function loadData() {
@@ -294,7 +498,7 @@
         
         // Перевіряємо чи є збережені дані для цього холодильника
         const hasData = inventoryData[fridge.fridgeNumber] && 
-                        inventoryData[fridge.fridgeNumber].some(p => p.quantity > 0);
+                        inventoryData[fridge.fridgeNumber].some(p => p.quantity !== "");
         
         if (hasData) {
           card.classList.add("selected");
@@ -315,9 +519,9 @@
       if (Object.keys(inventoryData).length > 0) {
         const saveAllBtn = document.createElement("button");
         saveAllBtn.className = "save-btn";
-        saveAllBtn.textContent = "💾 Зберегти всі залишки в Google Sheets";
+        saveAllBtn.textContent = "💾 Відправити інвентаризацію в Google Sheets";
         saveAllBtn.style.gridColumn = "1 / -1";
-        saveAllBtn.onclick = saveAllInventory;
+        saveAllBtn.onclick = checkAndSaveAll;
         selector.appendChild(saveAllBtn);
       }
     }
@@ -325,10 +529,14 @@
     // Показати продукти холодильника
     function showProducts(fridge) {
       currentFridge = fridge;
+      currentProducts = fridge.products;
       document.getElementById("fridge-selector").style.display = "none";
       document.getElementById("product-list").classList.add("active");
       document.getElementById("current-fridge-title").textContent = 
         `Холодильник ${fridge.fridgeNumber}`;
+      
+      // Очищуємо пошук
+      document.getElementById("search-input").value = "";
       
       const container = document.getElementById("products-container");
       container.innerHTML = "";
@@ -342,6 +550,9 @@
         
         const item = document.createElement("div");
         item.className = "product-item";
+        item.setAttribute("data-name", product.name.toLowerCase());
+        item.setAttribute("data-category", product.category.toLowerCase());
+        
         item.innerHTML = `
           <div class="product-info">
             <h3>${product.name}</h3>
@@ -359,7 +570,8 @@
               placeholder="0"
               value="${quantity}"
               data-product-name="${product.name}"
-              oninput="updateProgress()"
+              class="${quantity !== '' ? 'filled' : ''}"
+              oninput="updateProgress(); markAsFilled(this)"
             />
             <span>кг</span>
           </div>
@@ -368,6 +580,60 @@
       });
       
       updateProgress();
+      updateSearchStats();
+    }
+
+    // Позначити поле як заповнене
+    function markAsFilled(input) {
+      if (input.value !== "") {
+        input.classList.add("filled");
+      } else {
+        input.classList.remove("filled");
+      }
+    }
+
+    // Фільтрація продуктів
+    function filterProducts() {
+      const searchTerm = document.getElementById("search-input").value.toLowerCase();
+      const items = document.querySelectorAll(".product-item");
+      let visibleCount = 0;
+      
+      items.forEach(item => {
+        const name = item.getAttribute("data-name");
+        const category = item.getAttribute("data-category");
+        
+        if (name.includes(searchTerm) || category.includes(searchTerm)) {
+          item.classList.remove("hidden");
+          if (searchTerm !== "") {
+            item.classList.add("highlight");
+          } else {
+            item.classList.remove("highlight");
+          }
+          visibleCount++;
+        } else {
+          item.classList.add("hidden");
+          item.classList.remove("highlight");
+        }
+      });
+      
+      updateSearchStats(visibleCount, items.length);
+    }
+
+    // Оновлення статистики пошуку
+    function updateSearchStats(visible, total) {
+      const statsDiv = document.getElementById("search-stats");
+      const searchTerm = document.getElementById("search-input").value;
+      
+      if (!total) {
+        total = document.querySelectorAll(".product-item").length;
+        visible = total;
+      }
+      
+      if (searchTerm) {
+        statsDiv.textContent = `Знайдено: ${visible} з ${total} позицій`;
+      } else {
+        statsDiv.textContent = `Всього позицій: ${total}`;
+      }
     }
 
     // Оновлення прогресу заповнення
@@ -386,7 +652,7 @@
       const products = [];
       
       inputs.forEach(input => {
-        const quantity = parseFloat(input.value) || 0;
+        const quantity = input.value; // Зберігаємо як string, щоб відрізнити "" від "0"
         products.push({
           name: input.getAttribute("data-product-name"),
           quantity: quantity
@@ -397,11 +663,61 @@
       
       const messageDiv = document.getElementById("message");
       messageDiv.className = "message success";
-      messageDiv.textContent = "✅ Дані збережено! Можете перейти до наступного холодильника або зберегти все.";
+      messageDiv.textContent = "✅ Дані збережено! Можете перейти до наступного холодильника або відправити все.";
       
       setTimeout(() => {
         showFridgeSelector();
       }, 1500);
+    }
+
+    // Перевірка незаповнених позицій перед збереженням
+    function checkAndSaveAll() {
+      const unfilled = [];
+      
+      Object.keys(inventoryData).forEach(fridgeNum => {
+        inventoryData[fridgeNum].forEach(product => {
+          if (product.quantity === "") {
+            unfilled.push({
+              fridge: fridgeNum,
+              name: product.name
+            });
+          }
+        });
+      });
+      
+      if (unfilled.length > 0) {
+        showUnfilledModal(unfilled);
+      } else {
+        saveAllInventory();
+      }
+    }
+
+    // Показати модальне вікно з незаповненими позиціями
+    function showUnfilledModal(unfilled) {
+      const modal = document.getElementById("unfilled-modal");
+      const list = document.getElementById("unfilled-list");
+      
+      list.innerHTML = "";
+      
+      unfilled.forEach(item => {
+        const div = document.createElement("div");
+        div.className = "unfilled-item";
+        div.textContent = `Холодильник ${item.fridge}: ${item.name}`;
+        list.appendChild(div);
+      });
+      
+      modal.classList.add("active");
+    }
+
+    // Закрити модальне вікно
+    function closeUnfilledModal() {
+      document.getElementById("unfilled-modal").classList.remove("active");
+    }
+
+    // Підтвердити збереження з незаповненими позиціями
+    function confirmSave() {
+      closeUnfilledModal();
+      saveAllInventory();
     }
 
     // Зберегти всі дані в Google Sheets
@@ -409,7 +725,10 @@
       try {
         const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
           fridgeNumber,
-          products: inventoryData[fridgeNumber]
+          products: inventoryData[fridgeNumber].map(p => ({
+            name: p.name,
+            quantity: p.quantity === "" ? 0 : parseFloat(p.quantity) || 0
+          }))
         }));
         
         const response = await fetch(`${API_URL}/api/inventory/save`, {
@@ -417,16 +736,22 @@
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({ inventoryData: fridgeArray })
+          body: JSON.stringify({ 
+            inventoryData: fridgeArray,
+            inventoryDate: inventoryDate
+          })
         });
         
         const result = await response.json();
         
         if (result.success) {
-          alert("✅ " + result.message);
+          alert(`✅ ${result.message}\n\nАркуш: ${result.sheetName}`);
           // Очищаємо дані після успішного збереження
           inventoryData = {};
-          loadData(); // Перезавантажуємо дані
+          inventoryDate = null;
+          // Повертаємось до введення дати для нової інвентаризації
+          document.getElementById("date-modal").classList.add("active");
+          document.getElementById("fridge-selector").style.display = "none";
         } else {
           alert("❌ Помилка: " + result.error);
         }
@@ -434,9 +759,6 @@
         alert("❌ Помилка збереження: " + error.message);
       }
     }
-
-    // Запуск при завантаженні сторінки
-    loadData();
   </script>
 </body>
 </html>

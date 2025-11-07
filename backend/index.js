@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { writeProductsToSheet } from "./googleSheets.js";
+import { writeProductsToSheet, readProductsFromSheet, writeQuantitiesToSheet } from "./googleSheets.js";
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
 
 const app = express();
@@ -19,12 +19,10 @@ app.get("/api/products", async (req, res) => {
   try {
     const products = await getPosterProducts();
     
-    // Логируем первый продукт для проверки структуры
     if (products.length > 0) {
       console.log("Пример продукта из Poster:", JSON.stringify(products[0], null, 2));
     }
     
-    // Если Poster вернул пустой массив, отправляем тестовые данные
     if (products.length === 0) {
       console.log("⚠️ Poster API вернул пустой ответ, используем тестовые данные");
       return res.json(testProducts);
@@ -41,8 +39,6 @@ app.get("/api/products", async (req, res) => {
 app.get("/api/upload-to-sheets", async (req, res) => {
   try {
     const products = await getPosterProducts();
-    
-    // Используем тестовые данные если Poster не вернул ничего
     const dataToUpload = products.length > 0 ? products : testProducts;
     
     await writeProductsToSheet(dataToUpload);
@@ -88,10 +84,112 @@ app.get("/api/upload-all-to-sheets", async (req, res) => {
   }
 });
 
+// 🆕 📖 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS (для інвентаризації)
+app.get("/api/inventory/products", async (req, res) => {
+  try {
+    const products = await readProductsFromSheet();
+    
+    // Групуємо по холодильниках
+    const fridges = {};
+    
+    products.forEach(product => {
+      const fridgeNum = product.fridge || "Без холодильника";
+      
+      if (!fridges[fridgeNum]) {
+        fridges[fridgeNum] = [];
+      }
+      
+      fridges[fridgeNum].push({
+        name: product.name,
+        category: product.category,
+        type: product.type,
+        currentQuantity: product.quantity || 0,
+        rowIndex: product.rowIndex // Зберігаємо для можливого оновлення
+      });
+    });
+    
+    // Перетворюємо в масив для зручності
+    const result = Object.keys(fridges).map(fridgeNum => ({
+      fridgeNumber: fridgeNum,
+      products: fridges[fridgeNum]
+    }));
+    
+    console.log(`📋 Відправлено дані по ${result.length} холодильниках`);
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Помилка при читанні даних для інвентаризації:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 🆕 💾 ЗАПИС ЗАЛИШКІВ В GOOGLE SHEETS
+app.post("/api/inventory/save", async (req, res) => {
+  try {
+    const { inventoryData } = req.body;
+    // inventoryData = [
+    //   { fridgeNumber: "1", products: [{ name: "Coca Cola", quantity: 5 }, ...] },
+    //   { fridgeNumber: "2", products: [{ name: "Coca Cola", quantity: 3 }, ...] }
+    // ]
+    
+    if (!inventoryData || !Array.isArray(inventoryData)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Невірний формат даних" 
+      });
+    }
+    
+    // Збираємо всі продукти та сумуємо однакові
+    const productTotals = new Map();
+    
+    inventoryData.forEach(fridge => {
+      fridge.products.forEach(product => {
+        const quantity = parseFloat(product.quantity) || 0;
+        
+        if (productTotals.has(product.name)) {
+          productTotals.set(product.name, productTotals.get(product.name) + quantity);
+        } else {
+          productTotals.set(product.name, quantity);
+        }
+      });
+    });
+    
+    // Перетворюємо Map в масив для запису
+    const quantities = Array.from(productTotals.entries()).map(([name, totalQuantity]) => ({
+      name,
+      totalQuantity
+    }));
+    
+    await writeQuantitiesToSheet(quantities);
+    
+    res.json({ 
+      success: true, 
+      message: `✅ Залишки успішно збережено! Оновлено ${quantities.length} позицій`,
+      saved: quantities
+    });
+  } catch (error) {
+    console.error("❌ Помилка при збереженні залишків:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // 🏠 Главная страница
 app.get("/", (req, res) => {
-  res.send("✅ Сервер работает! Доступные endpoints: /api/products, /api/upload-to-sheets, /api/upload-all-to-sheets (все позиции)");
+  res.send(`
+    ✅ Сервер працює!<br><br>
+    Доступні endpoints:<br>
+    - GET /api/products - отримати продукти з Poster<br>
+    - GET /api/upload-to-sheets - завантажити продукти в Sheets<br>
+    - GET /api/upload-all-to-sheets - завантажити всі позиції в Sheets<br>
+    - GET /api/inventory/products - отримати продукти для інвентаризації (по холодильниках)<br>
+    - POST /api/inventory/save - зберегти залишки в Google Sheets
+  `);
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Сервер запущен на порту ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Сервер запущений на порту ${PORT}`));

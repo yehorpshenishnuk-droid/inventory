@@ -17,13 +17,14 @@ const sheets = google.sheets({ version: "v4", auth });
 
 // === Основная логика ===
 const SPREADSHEET_ID = "1eiJw3ADAdq6GfQxsbJp0STDsc1MyJfPXCf2caQy8khw";
+const MASTER_SHEET_NAME = "Лист1"; // Головний аркуш з шаблоном
 
 // 📥 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS
 export async function readProductsFromSheet() {
   try {
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: "A2:E", // Читаємо з 2-го рядка (без заголовків) всі колонки A-E
+      range: `${MASTER_SHEET_NAME}!A2:E`, // Читаємо з головного аркуша
     });
 
     const rows = response.data.values || [];
@@ -68,6 +69,126 @@ export async function readProductsFromSheet() {
     return products;
   } catch (error) {
     console.error("❌ Помилка при читанні даних з Google Sheets:", error);
+    throw error;
+  }
+}
+
+// 🆕 СТВОРЕННЯ НОВОГО АРКУША ДЛЯ ІНВЕНТАРИЗАЦІЇ
+export async function createInventorySheet(date) {
+  try {
+    const sheetName = `Інвентаризація ${date}`;
+    
+    // Перевіряємо чи існує вже такий аркуш
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const existingSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === sheetName
+    );
+    
+    if (existingSheet) {
+      console.log(`⚠️ Аркуш "${sheetName}" вже існує`);
+      return sheetName;
+    }
+    
+    // Копіюємо дані з головного аркуша
+    const masterData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET_NAME}!A1:D`, // Копіюємо без колонки E (Залишки)
+    });
+    
+    // Створюємо новий аркуш
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{
+          addSheet: {
+            properties: {
+              title: sheetName
+            }
+          }
+        }]
+      }
+    });
+    
+    // Копіюємо структуру (заголовки + дані без залишків)
+    const rows = masterData.data.values || [];
+    const newRows = rows.map((row, index) => {
+      if (index === 0) {
+        // Заголовки + додаємо колонку "Залишки"
+        return [...row, "Залишки"];
+      } else {
+        // Дані без залишків
+        return row.slice(0, 4); // Тільки A, B, C, D
+      }
+    });
+    
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: newRows }
+    });
+    
+    console.log(`✅ Створено новий аркуш: ${sheetName}`);
+    return sheetName;
+  } catch (error) {
+    console.error("❌ Помилка при створенні аркуша:", error);
+    throw error;
+  }
+}
+
+// 📤 ЗАПИС ЗАЛИШКІВ В НОВИЙ АРКУШ ІНВЕНТАРИЗАЦІЇ
+export async function writeQuantitiesToInventorySheet(sheetName, quantities) {
+  try {
+    // Читаємо всі дані з нового аркуша
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A2:D`, // Читаємо без колонки E
+    });
+    
+    const rows = response.data.values || [];
+    
+    // Створюємо Map для швидкого пошуку
+    const quantityMap = new Map();
+    quantities.forEach(q => {
+      quantityMap.set(q.name, q.totalQuantity);
+    });
+    
+    // Готуємо масив для batch update
+    const updates = [];
+    
+    rows.forEach((row, index) => {
+      const productName = row[1]; // Колонка B - Назва
+      const rowIndex = index + 2;
+      
+      if (quantityMap.has(productName)) {
+        const quantity = quantityMap.get(productName);
+        updates.push({
+          range: `${sheetName}!E${rowIndex}`,
+          values: [[quantity]]
+        });
+      }
+    });
+    
+    if (updates.length === 0) {
+      console.log("⚠️ Немає даних для запису");
+      return;
+    }
+    
+    // Batch update - оновлюємо всі комірки одним запитом
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        valueInputOption: "RAW",
+        data: updates
+      }
+    });
+    
+    console.log(`✅ Оновлено ${updates.length} записів у аркуші "${sheetName}"`);
+  } catch (error) {
+    console.error("❌ Помилка при запису залишків:", error);
     throw error;
   }
 }

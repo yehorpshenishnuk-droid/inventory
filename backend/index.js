@@ -201,38 +201,29 @@ app.post("/api/inventory/save", async (req, res) => {
       });
     }
     
-    // Створюємо новий аркуш з датою
-    const sheetName = await createInventorySheet(inventoryDate);
+    // Отримуємо список всіх холодильників
+    const fridgeNumbers = inventoryData.map(f => f.fridgeNumber);
     
-    // Збираємо всі продукти та сумуємо однакові
-    const productTotals = new Map();
+    // Створюємо новий аркуш з датою та динамічними колонками
+    const sheetName = await createInventorySheet(inventoryDate, fridgeNumbers);
+    
+    // Готуємо дані по холодильниках (не сумуємо!)
+    const inventoryByFridge = {};
     
     inventoryData.forEach(fridge => {
-      fridge.products.forEach(product => {
-        const quantity = parseFloat(product.quantity) || 0;
-        
-        if (productTotals.has(product.name)) {
-          productTotals.set(product.name, productTotals.get(product.name) + quantity);
-        } else {
-          productTotals.set(product.name, quantity);
-        }
-      });
+      inventoryByFridge[fridge.fridgeNumber] = fridge.products.map(p => ({
+        name: p.name,
+        quantity: p.quantity
+      }));
     });
     
-    // Перетворюємо Map в масив для запису
-    const quantities = Array.from(productTotals.entries()).map(([name, totalQuantity]) => ({
-      name,
-      totalQuantity
-    }));
-    
-    // Записуємо в новий аркуш
-    await writeQuantitiesToInventorySheet(sheetName, quantities);
+    // Записуємо в новий аркуш (окремі колонки для кожного холодильника)
+    await writeQuantitiesToInventorySheet(sheetName, inventoryByFridge);
     
     res.json({ 
       success: true, 
-      message: `✅ Інвентаризацію успішно збережено в аркуш "${sheetName}"! Оновлено ${quantities.length} позицій`,
-      sheetName,
-      saved: quantities
+      message: `✅ Інвентаризацію успішно збережено в аркуш "${sheetName}"!`,
+      sheetName
     });
   } catch (error) {
     console.error("❌ Помилка при збереженні залишків:", error);

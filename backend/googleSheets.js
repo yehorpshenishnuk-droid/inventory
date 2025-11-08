@@ -180,7 +180,7 @@ export async function createInventorySheet(date, fridgeNumbers) {
       return sheetName;
     }
     
-    // Копіюємо дані з головного аркуша
+    // Копіюємо дані з головного аркуша (тільки A, B, C, D)
     const masterData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${MASTER_SHEET_NAME}!A1:D`,
@@ -200,41 +200,43 @@ export async function createInventorySheet(date, fridgeNumbers) {
       }
     });
     
-    // Підготовка даних з динамічними заголовками холодильників
     const rows = masterData.data.values || [];
-    const newRows = rows.map((row, index) => {
-      if (index === 0) {
-        // Заголовки
-        const headers = [...row]; // A, B, C, D
-        
-        // Додаємо колонки для кожного холодильника
-        const sortedFridges = fridgeNumbers.sort((a, b) => {
-          const numA = parseInt(a) || 0;
-          const numB = parseInt(b) || 0;
-          return numA - numB;
-        });
-        
-        sortedFridges.forEach(fridgeNum => {
-          headers.push(`холодильник ${fridgeNum}`);
-        });
-        
-        headers.push("Залишки"); // Колонка L для загальної суми
-        
-        return headers;
-      } else {
-        // Дані без залишків
-        return row.slice(0, 4); // Тільки A, B, C, D
-      }
+    
+    // Сортуємо номери холодильників
+    const sortedFridges = fridgeNumbers.sort((a, b) => {
+      const numA = parseInt(a) || 0;
+      const numB = parseInt(b) || 0;
+      return numA - numB;
     });
     
+    // Формуємо перший рядок з заголовками
+    const headerRow = rows[0] || ["Холодильник", "Назва", "Категорія", "Тип"];
+    
+    // Додаємо заголовки для кожного холодильника
+    sortedFridges.forEach(fridgeNum => {
+      headerRow.push(`холодильник ${fridgeNum}`);
+    });
+    
+    // Додаємо колонку "Залишки" в кінці
+    headerRow.push("Залишки");
+    
+    // Готуємо всі рядки
+    const allRows = [headerRow];
+    
+    // Додаємо рядки з даними (без холодильників і залишків - тільки A, B, C, D)
+    for (let i = 1; i < rows.length; i++) {
+      allRows.push(rows[i].slice(0, 4)); // Тільки перші 4 колонки
+    }
+    
+    // Записуємо всі дані одним запитом
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1`,
       valueInputOption: "RAW",
-      requestBody: { values: newRows }
+      requestBody: { values: allRows }
     });
     
-    console.log(`✅ Створено новий аркуш: ${sheetName}`);
+    console.log(`✅ Створено новий аркуш: ${sheetName} з ${sortedFridges.length} холодильниками`);
     return sheetName;
   } catch (error) {
     console.error("❌ Помилка при створенні аркуша:", error);
@@ -260,19 +262,25 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     const rows = response.data.values || [];
     
     // Визначаємо які колонки відповідають яким холодильникам
-    // E = холодильник 1, F = холодильник 2, G = холодильник 3, і т.д.
-    const fridgeToColumn = {};
+    // Сортуємо холодильники по номерах
     const allFridges = Object.keys(inventoryByFridge).sort((a, b) => {
-      // Сортуємо щоб холодильники йшли по порядку
       const numA = parseInt(a) || 0;
       const numB = parseInt(b) || 0;
       return numA - numB;
     });
     
+    // Створюємо відповідність: холодильник → колонка
+    // E = перший холодильник, F = другий холодильник, і т.д.
+    const fridgeToColumn = {};
     allFridges.forEach((fridgeNum, index) => {
-      // E=0, F=1, G=2, H=3, і т.д.
       fridgeToColumn[fridgeNum] = String.fromCharCode(69 + index); // 69 = 'E'
     });
+    
+    // Колонка для загальної суми - після всіх холодильників
+    const totalColumn = String.fromCharCode(69 + allFridges.length);
+    
+    console.log("📋 Відповідність холодильників та колонок:", fridgeToColumn);
+    console.log("📋 Колонка для загальної суми:", totalColumn);
     
     // Створюємо Map для швидкого пошуку по кожному холодильнику
     const dataByFridge = {};
@@ -290,6 +298,8 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
       const productName = row[1]; // Колонка B - Назва
       const rowIndex = index + 2;
       
+      let totalForProduct = 0;
+      
       // Для кожного холодильника записуємо його дані
       allFridges.forEach(fridgeNum => {
         const column = fridgeToColumn[fridgeNum];
@@ -300,22 +310,15 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
             range: `${sheetName}!${column}${rowIndex}`,
             values: [[quantity]]
           });
+          totalForProduct += quantity;
         }
       });
       
-      // Обчислюємо загальну суму для колонки L "Залишки"
-      let total = 0;
-      allFridges.forEach(fridgeNum => {
-        if (dataByFridge[fridgeNum].has(productName)) {
-          total += dataByFridge[fridgeNum].get(productName);
-        }
-      });
-      
-      if (total > 0) {
-        // Колонка L для загальної суми
+      // Записуємо загальну суму
+      if (totalForProduct > 0) {
         updates.push({
-          range: `${sheetName}!L${rowIndex}`,
-          values: [[total]]
+          range: `${sheetName}!${totalColumn}${rowIndex}`,
+          values: [[totalForProduct]]
         });
       }
     });

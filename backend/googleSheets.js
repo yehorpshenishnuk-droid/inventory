@@ -162,7 +162,7 @@ export async function checkInventorySheetExists(date) {
 }
 
 // 🆕 СТВОРЕННЯ НОВОГО АРКУША ДЛЯ ІНВЕНТАРИЗАЦІЇ
-export async function createInventorySheet(date) {
+export async function createInventorySheet(date, fridgeNumbers) {
   try {
     const sheetName = `Інвентаризація ${date}`;
     
@@ -183,7 +183,7 @@ export async function createInventorySheet(date) {
     // Копіюємо дані з головного аркуша
     const masterData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A1:D`, // Копіюємо без колонки E (Залишки)
+      range: `${MASTER_SHEET_NAME}!A1:D`,
     });
     
     // Створюємо новий аркуш
@@ -200,12 +200,27 @@ export async function createInventorySheet(date) {
       }
     });
     
-    // Копіюємо структуру (заголовки + дані без залишків)
+    // Підготовка даних з динамічними заголовками холодильників
     const rows = masterData.data.values || [];
     const newRows = rows.map((row, index) => {
       if (index === 0) {
-        // Заголовки + додаємо колонку "Залишки"
-        return [...row, "Залишки"];
+        // Заголовки
+        const headers = [...row]; // A, B, C, D
+        
+        // Додаємо колонки для кожного холодильника
+        const sortedFridges = fridgeNumbers.sort((a, b) => {
+          const numA = parseInt(a) || 0;
+          const numB = parseInt(b) || 0;
+          return numA - numB;
+        });
+        
+        sortedFridges.forEach(fridgeNum => {
+          headers.push(`холодильник ${fridgeNum}`);
+        });
+        
+        headers.push("Залишки"); // Колонка L для загальної суми
+        
+        return headers;
       } else {
         // Дані без залишків
         return row.slice(0, 4); // Тільки A, B, C, D
@@ -227,21 +242,45 @@ export async function createInventorySheet(date) {
   }
 }
 
-// 📤 ЗАПИС ЗАЛИШКІВ В НОВИЙ АРКУШ ІНВЕНТАРИЗАЦІЇ
-export async function writeQuantitiesToInventorySheet(sheetName, quantities) {
+// 📤 ЗАПИС ЗАЛИШКІВ В НОВИЙ АРКУШ ІНВЕНТАРИЗАЦІЇ (ОКРЕМІ КОЛОНКИ)
+export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFridge) {
   try {
+    // inventoryByFridge = {
+    //   "1": [{ name: "Coca Cola", quantity: 1 }],
+    //   "2": [{ name: "Fanta", quantity: 2 }],
+    //   "3": [{ name: "Coca Cola", quantity: 3 }]
+    // }
+    
     // Читаємо всі дані з нового аркуша
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:D`, // Читаємо без колонки E
+      range: `${sheetName}!A2:D`,
     });
     
     const rows = response.data.values || [];
     
-    // Створюємо Map для швидкого пошуку
-    const quantityMap = new Map();
-    quantities.forEach(q => {
-      quantityMap.set(q.name, q.totalQuantity);
+    // Визначаємо які колонки відповідають яким холодильникам
+    // E = холодильник 1, F = холодильник 2, G = холодильник 3, і т.д.
+    const fridgeToColumn = {};
+    const allFridges = Object.keys(inventoryByFridge).sort((a, b) => {
+      // Сортуємо щоб холодильники йшли по порядку
+      const numA = parseInt(a) || 0;
+      const numB = parseInt(b) || 0;
+      return numA - numB;
+    });
+    
+    allFridges.forEach((fridgeNum, index) => {
+      // E=0, F=1, G=2, H=3, і т.д.
+      fridgeToColumn[fridgeNum] = String.fromCharCode(69 + index); // 69 = 'E'
+    });
+    
+    // Створюємо Map для швидкого пошуку по кожному холодильнику
+    const dataByFridge = {};
+    allFridges.forEach(fridgeNum => {
+      dataByFridge[fridgeNum] = new Map();
+      inventoryByFridge[fridgeNum].forEach(item => {
+        dataByFridge[fridgeNum].set(item.name, item.quantity);
+      });
     });
     
     // Готуємо масив для batch update
@@ -251,11 +290,32 @@ export async function writeQuantitiesToInventorySheet(sheetName, quantities) {
       const productName = row[1]; // Колонка B - Назва
       const rowIndex = index + 2;
       
-      if (quantityMap.has(productName)) {
-        const quantity = quantityMap.get(productName);
+      // Для кожного холодильника записуємо його дані
+      allFridges.forEach(fridgeNum => {
+        const column = fridgeToColumn[fridgeNum];
+        
+        if (dataByFridge[fridgeNum].has(productName)) {
+          const quantity = dataByFridge[fridgeNum].get(productName);
+          updates.push({
+            range: `${sheetName}!${column}${rowIndex}`,
+            values: [[quantity]]
+          });
+        }
+      });
+      
+      // Обчислюємо загальну суму для колонки L "Залишки"
+      let total = 0;
+      allFridges.forEach(fridgeNum => {
+        if (dataByFridge[fridgeNum].has(productName)) {
+          total += dataByFridge[fridgeNum].get(productName);
+        }
+      });
+      
+      if (total > 0) {
+        // Колонка L для загальної суми
         updates.push({
-          range: `${sheetName}!E${rowIndex}`,
-          values: [[quantity]]
+          range: `${sheetName}!L${rowIndex}`,
+          values: [[total]]
         });
       }
     });
@@ -274,7 +334,7 @@ export async function writeQuantitiesToInventorySheet(sheetName, quantities) {
       }
     });
     
-    console.log(`✅ Оновлено ${updates.length} записів у аркуші "${sheetName}"`);
+    console.log(`✅ Оновлено ${updates.length} комірок у аркуші "${sheetName}"`);
   } catch (error) {
     console.error("❌ Помилка при запису залишків:", error);
     throw error;

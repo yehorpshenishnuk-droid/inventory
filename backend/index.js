@@ -5,7 +5,9 @@ import {
   readProductsFromSheet, 
   writeQuantitiesToSheet,
   createInventorySheet,
-  writeQuantitiesToInventorySheet
+  writeQuantitiesToInventorySheet,
+  readInventorySheetData,
+  checkInventorySheetExists
 } from "./googleSheets.js";
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
 
@@ -93,9 +95,55 @@ app.get("/api/upload-all-to-sheets", async (req, res) => {
 // 🆕 📖 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS (для інвентаризації)
 app.get("/api/inventory/products", async (req, res) => {
   try {
+    const { date } = req.query;
+    
+    // Якщо передана дата, перевіряємо чи є вже інвентаризація за цю дату
+    if (date) {
+      const exists = await checkInventorySheetExists(date);
+      
+      if (exists) {
+        // Завантажуємо дані з існуючого аркуша
+        const inventoryData = await readInventorySheetData(date);
+        
+        if (inventoryData) {
+          // Групуємо по холодильниках
+          const fridges = {};
+          
+          inventoryData.forEach(product => {
+            const fridgeNum = product.fridge || "Без холодильника";
+            
+            if (!fridges[fridgeNum]) {
+              fridges[fridgeNum] = [];
+            }
+            
+            fridges[fridgeNum].push({
+              name: product.name,
+              category: product.category,
+              type: product.type,
+              currentQuantity: product.quantity || 0,
+              savedQuantity: product.quantity || "", // Збережена кількість
+              rowIndex: product.rowIndex
+            });
+          });
+          
+          const result = Object.keys(fridges).map(fridgeNum => ({
+            fridgeNumber: fridgeNum,
+            products: fridges[fridgeNum]
+          }));
+          
+          console.log(`📋 Відправлено дані існуючої інвентаризації за ${date}`);
+          return res.json({ 
+            data: result, 
+            existingInventory: true,
+            date 
+          });
+        }
+      }
+    }
+    
+    // Якщо немає існуючої інвентаризації, завантажуємо з головного аркуша
     const products = await readProductsFromSheet();
     
-    // Групуємо по холодильниках
     const fridges = {};
     
     products.forEach(product => {
@@ -110,18 +158,21 @@ app.get("/api/inventory/products", async (req, res) => {
         category: product.category,
         type: product.type,
         currentQuantity: product.quantity || 0,
-        rowIndex: product.rowIndex // Зберігаємо для можливого оновлення
+        savedQuantity: "", // Немає збереженої кількості
+        rowIndex: product.rowIndex
       });
     });
     
-    // Перетворюємо в масив для зручності
     const result = Object.keys(fridges).map(fridgeNum => ({
       fridgeNumber: fridgeNum,
       products: fridges[fridgeNum]
     }));
     
     console.log(`📋 Відправлено дані по ${result.length} холодильниках`);
-    res.json(result);
+    res.json({ 
+      data: result, 
+      existingInventory: false 
+    });
   } catch (error) {
     console.error("❌ Помилка при читанні даних для інвентаризації:", error);
     res.status(500).json({ 

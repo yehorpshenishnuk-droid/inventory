@@ -481,7 +481,7 @@
     <div id="product-list">
       <div class="top-buttons">
         <button class="back-btn" onclick="showFridgeSelector()">← Назад</button>
-        <button class="save-now-btn" onclick="saveToGoogleSheetsNow()">💾 Зберегти в Google Sheets зараз</button>
+        <button class="save-now-btn" onclick="syncToGoogleSheets()">🔄 Синхронізація</button>
       </div>
       <h2 id="current-fridge-title"></h2>
       
@@ -634,7 +634,7 @@
       if (Object.keys(inventoryData).length > 0) {
         const saveAllBtn = document.createElement("button");
         saveAllBtn.className = "save-btn";
-        saveAllBtn.textContent = "💾 Відправити інвентаризацію в Google Sheets";
+        saveAllBtn.textContent = "✅ Провести інвентаризацію";
         saveAllBtn.style.gridColumn = "1 / -1";
         saveAllBtn.onclick = checkAndSaveAll;
         selector.appendChild(saveAllBtn);
@@ -837,13 +837,57 @@
       }, 1500);
     }
 
-    // Зберегти в Google Sheets зараз
-    async function saveToGoogleSheetsNow() {
-      // Спочатку зберігаємо поточний холодильник
-      saveCurrentFridge();
+    // Синхронізація з Google Sheets (без закриття інвентаризації)
+    async function syncToGoogleSheets() {
+      // Спочатку зберігаємо поточний холодильник локально
+      const inputs = document.querySelectorAll("#products-container input");
+      const products = [];
       
-      // Потім відправляємо все в Google Sheets
-      await checkAndSaveAll();
+      inputs.forEach(input => {
+        const quantity = input.value;
+        products.push({
+          name: input.getAttribute("data-product-name"),
+          quantity: quantity
+        });
+      });
+      
+      inventoryData[currentFridge.fridgeNumber] = products;
+      saveDraft();
+      
+      // Готуємо дані для відправки
+      const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
+        fridgeNumber,
+        products: inventoryData[fridgeNumber].map(p => ({
+          name: p.name,
+          quantity: p.quantity === "" ? 0 : parseFloat(p.quantity.replace(/,/g, '.')) || 0
+        }))
+      }));
+      
+      try {
+        showMessage("🔄 Синхронізація з Google Sheets...", "info");
+        
+        const response = await fetch(`${API_URL}/api/inventory/save`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ 
+            inventoryData: fridgeArray,
+            inventoryDate: inventoryDate
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          showMessage("✅ Синхронізовано з Google Sheets!", "success");
+          hasUnsavedChanges = false;
+        } else {
+          showMessage("❌ Помилка синхронізації: " + result.error, "error");
+        }
+      } catch (error) {
+        showMessage("❌ Помилка синхронізації: " + error.message, "error");
+      }
     }
 
     // Перевірка незаповнених позицій

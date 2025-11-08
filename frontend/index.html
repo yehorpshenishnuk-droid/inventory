@@ -31,7 +31,7 @@
       text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
     }
     
-    /* Модальне вікно для дати */
+    /* Модальні вікна */
     .modal {
       display: none;
       position: fixed;
@@ -63,13 +63,18 @@
       color: #333;
     }
     
-    .modal-content input[type="date"] {
+    .modal-content input {
       width: 100%;
       padding: 15px;
       font-size: 1.2em;
       border: 2px solid #ddd;
       border-radius: 10px;
       margin-bottom: 20px;
+    }
+    
+    .modal-content input:focus {
+      outline: none;
+      border-color: #667eea;
     }
     
     .modal-content button {
@@ -81,6 +86,7 @@
       cursor: pointer;
       font-size: 1.1em;
       font-weight: bold;
+      transition: background 0.3s;
     }
     
     .modal-content button:hover {
@@ -144,20 +150,39 @@
       display: block;
     }
     
-    .back-btn {
-      background: #667eea;
+    .top-buttons {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .back-btn, .save-now-btn {
       color: white;
       border: none;
       padding: 12px 24px;
       border-radius: 8px;
       cursor: pointer;
       font-size: 1em;
-      margin-bottom: 20px;
       transition: background 0.3s;
+      font-weight: 500;
+    }
+    
+    .back-btn {
+      background: #667eea;
+      flex: 1;
     }
     
     .back-btn:hover {
       background: #5568d3;
+    }
+    
+    .save-now-btn {
+      background: #f59e0b;
+      flex: 2;
+    }
+    
+    .save-now-btn:hover {
+      background: #d97706;
     }
     
     /* Пошук */
@@ -188,6 +213,13 @@
       margin-top: 10px;
       color: #666;
       font-size: 0.9em;
+      display: flex;
+      justify-content: space-between;
+    }
+    
+    .autosave-indicator {
+      color: #10b981;
+      font-size: 0.85em;
     }
     
     .product-item {
@@ -268,6 +300,11 @@
       background: #f0fdf4;
     }
     
+    .quantity-input input.error {
+      border-color: #ef4444;
+      background: #fef2f2;
+    }
+    
     .quantity-input span {
       color: #666;
       font-size: 0.9em;
@@ -334,6 +371,11 @@
       color: #92400e;
     }
     
+    .message.info {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+    
     .loading {
       text-align: center;
       padding: 40px;
@@ -380,14 +422,31 @@
     .btn-secondary:hover {
       background: #4b5563 !important;
     }
+    
+    .error-text {
+      color: #ef4444;
+      font-size: 0.9em;
+      margin-top: 5px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>❄️ Інвентаризація холодильників</h1>
     
+    <!-- Авторизація -->
+    <div id="auth-modal" class="modal active">
+      <div class="modal-content">
+        <h2>🔐 Авторизація</h2>
+        <p style="color: #666; margin-bottom: 20px;">Введіть код доступу</p>
+        <input type="password" id="auth-code" placeholder="Код доступу" />
+        <p id="auth-error" class="error-text" style="display: none;">Невірний код</p>
+        <button onclick="checkAuth()">Увійти</button>
+      </div>
+    </div>
+    
     <!-- Модальне вікно для введення дати -->
-    <div id="date-modal" class="modal active">
+    <div id="date-modal" class="modal">
       <div class="modal-content">
         <h2>📅 Дата інвентаризації</h2>
         <p style="color: #666; margin-bottom: 20px;">Введіть дату проведення інвентаризації</p>
@@ -420,7 +479,10 @@
     
     <!-- Екран списку продуктів -->
     <div id="product-list">
-      <button class="back-btn" onclick="showFridgeSelector()">← Назад до холодильників</button>
+      <div class="top-buttons">
+        <button class="back-btn" onclick="showFridgeSelector()">← Назад</button>
+        <button class="save-now-btn" onclick="saveToGoogleSheetsNow()">💾 Зберегти в Google Sheets зараз</button>
+      </div>
       <h2 id="current-fridge-title"></h2>
       
       <!-- Пошук -->
@@ -432,7 +494,10 @@
           placeholder="🔍 Пошук продукту (наприклад: кока, пиво, салат...)"
           oninput="filterProducts()"
         />
-        <div class="search-stats" id="search-stats"></div>
+        <div class="search-stats">
+          <span id="search-stats-text"></span>
+          <span class="autosave-indicator" id="autosave-indicator"></span>
+        </div>
       </div>
       
       <div class="progress-bar">
@@ -440,23 +505,43 @@
       </div>
       <div id="message"></div>
       <div id="products-container"></div>
-      <button class="save-btn" onclick="saveCurrentFridge()">💾 Зберегти залишки</button>
+      <button class="save-btn" onclick="saveCurrentFridge()">✅ Зберегти залишки цього холодильника</button>
     </div>
   </div>
 
   <script>
     const API_URL = "https://inventory-duab.onrender.com";
+    const AUTH_CODE = "1234"; // Змініть на ваш код
+    
     let allFridges = [];
     let currentFridge = null;
-    let inventoryData = {}; // Зберігаємо всі введені дані
-    let inventoryDate = null; // Дата інвентаризації
-    let currentProducts = []; // Поточні продукти для фільтрації
+    let inventoryData = {};
+    let inventoryDate = null;
+    let currentProducts = [];
+    let hasUnsavedChanges = false;
+    let autosaveInterval = null;
+    let isExistingInventory = false;
 
-    // Встановлюємо сьогоднішню дату за замовчуванням
-    document.getElementById("inventory-date").valueAsDate = new Date();
+    // Перевірка авторизації
+    function checkAuth() {
+      const code = document.getElementById("auth-code").value;
+      if (code === AUTH_CODE) {
+        document.getElementById("auth-modal").classList.remove("active");
+        document.getElementById("date-modal").classList.add("active");
+        // Встановлюємо сьогоднішню дату
+        document.getElementById("inventory-date").valueAsDate = new Date();
+      } else {
+        document.getElementById("auth-error").style.display = "block";
+      }
+    }
 
-    // Початок інвентаризації після введення дати
-    function startInventory() {
+    // Enter для авторизації
+    document.getElementById("auth-code")?.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") checkAuth();
+    });
+
+    // Початок інвентаризації
+    async function startInventory() {
       const dateInput = document.getElementById("inventory-date").value;
       if (!dateInput) {
         alert("Будь ласка, введіть дату інвентаризації");
@@ -465,16 +550,37 @@
       
       inventoryDate = dateInput;
       document.getElementById("date-modal").classList.remove("active");
-      loadData();
+      
+      // Завантажуємо чернетку з localStorage
+      loadDraft();
+      
+      // Завантажуємо дані
+      await loadData();
+      
+      // Запускаємо автозбереження
+      startAutosave();
     }
 
-    // Завантаження даних при старті
+    // Завантаження даних
     async function loadData() {
       try {
-        const response = await fetch(`${API_URL}/api/inventory/products`);
-        const data = await response.json();
+        const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
+        const result = await response.json();
         
-        allFridges = data;
+        allFridges = result.data || result;
+        isExistingInventory = result.existingInventory || false;
+        
+        if (isExistingInventory) {
+          // Якщо існує інвентаризація за цю дату, завантажуємо збережені дані
+          allFridges.forEach(fridge => {
+            inventoryData[fridge.fridgeNumber] = fridge.products.map(p => ({
+              name: p.name,
+              quantity: p.savedQuantity || ""
+            }));
+          });
+          
+          showMessage(`📋 Завантажено існуючу інвентаризацію за ${inventoryDate}`, "info");
+        }
         
         document.getElementById("loading").style.display = "none";
         showFridgeSelector();
@@ -482,6 +588,17 @@
         document.getElementById("loading").innerHTML = 
           `<div class="message error">❌ Помилка завантаження: ${error.message}</div>`;
       }
+    }
+
+    // Показати повідомлення
+    function showMessage(text, type = "success") {
+      const messageDiv = document.getElementById("message");
+      messageDiv.className = `message ${type}`;
+      messageDiv.textContent = text;
+      setTimeout(() => {
+        messageDiv.textContent = "";
+        messageDiv.className = "message";
+      }, 5000);
     }
 
     // Показати екран вибору холодильників
@@ -496,7 +613,6 @@
         const card = document.createElement("div");
         card.className = "fridge-card";
         
-        // Перевіряємо чи є збережені дані для цього холодильника
         const hasData = inventoryData[fridge.fridgeNumber] && 
                         inventoryData[fridge.fridgeNumber].some(p => p.quantity !== "");
         
@@ -515,7 +631,6 @@
         selector.appendChild(card);
       });
       
-      // Додаємо кнопку "Зберегти все"
       if (Object.keys(inventoryData).length > 0) {
         const saveAllBtn = document.createElement("button");
         saveAllBtn.className = "save-btn";
@@ -535,18 +650,16 @@
       document.getElementById("current-fridge-title").textContent = 
         `Холодильник ${fridge.fridgeNumber}`;
       
-      // Очищуємо пошук
       document.getElementById("search-input").value = "";
       
       const container = document.getElementById("products-container");
       container.innerHTML = "";
       
-      // Завантажуємо збережені дані якщо є
       const savedData = inventoryData[fridge.fridgeNumber] || [];
       
-      fridge.products.forEach((product, index) => {
+      fridge.products.forEach((product) => {
         const savedProduct = savedData.find(p => p.name === product.name);
-        const quantity = savedProduct ? savedProduct.quantity : "";
+        const quantity = savedProduct ? savedProduct.quantity : (product.savedQuantity || "");
         
         const item = document.createElement("div");
         item.className = "product-item";
@@ -560,18 +673,17 @@
             <span class="type">${product.type}</span>
           </div>
           <div class="current-quantity">
-            ${product.currentQuantity ? `Поточний: ${product.currentQuantity}` : ''}
+            ${product.currentQuantity && product.currentQuantity !== "0" ? `Поточний: ${product.currentQuantity}` : ''}
           </div>
           <div class="quantity-input">
             <input 
-              type="number" 
-              step="0.01" 
-              min="0" 
-              placeholder="0"
+              type="text" 
+              placeholder="0 або 1+2"
               value="${quantity}"
               data-product-name="${product.name}"
               class="${quantity !== '' ? 'filled' : ''}"
-              oninput="updateProgress(); markAsFilled(this)"
+              oninput="handleInput(this)"
+              onblur="calculateExpression(this)"
             />
             <span>кг</span>
           </div>
@@ -581,6 +693,61 @@
       
       updateProgress();
       updateSearchStats();
+    }
+
+    // Обробка введення
+    function handleInput(input) {
+      hasUnsavedChanges = true;
+      
+      // Нормалізація: заміна коми на крапку
+      let value = input.value.replace(/,/g, '.');
+      
+      // Видалення пробілів та тексту (кг, г, т.д.)
+      value = value.replace(/[^\d+\-*/().]/g, '');
+      
+      input.value = value;
+      
+      // Видалення класу помилки
+      input.classList.remove("error");
+      
+      updateProgress();
+      markAsFilled(input);
+    }
+
+    // Обчислення виразів (1+2, 5+3.5)
+    function calculateExpression(input) {
+      const value = input.value.trim();
+      
+      if (value === "") {
+        input.classList.remove("filled");
+        return;
+      }
+      
+      // Якщо є математичні оператори, обчислюємо
+      if (/[+\-*/]/.test(value)) {
+        try {
+          const result = eval(value);
+          if (!isNaN(result) && isFinite(result)) {
+            input.value = result.toFixed(2).replace(/\.?0+$/, '');
+            input.classList.add("filled");
+          } else {
+            input.classList.add("error");
+          }
+        } catch (e) {
+          input.classList.add("error");
+        }
+      } else {
+        // Перевірка чи це число
+        const num = parseFloat(value);
+        if (isNaN(num)) {
+          input.classList.add("error");
+        } else {
+          input.value = num.toString();
+          input.classList.add("filled");
+        }
+      }
+      
+      updateProgress();
     }
 
     // Позначити поле як заповнене
@@ -621,7 +788,7 @@
 
     // Оновлення статистики пошуку
     function updateSearchStats(visible, total) {
-      const statsDiv = document.getElementById("search-stats");
+      const statsDiv = document.getElementById("search-stats-text");
       const searchTerm = document.getElementById("search-input").value;
       
       if (!total) {
@@ -636,7 +803,7 @@
       }
     }
 
-    // Оновлення прогресу заповнення
+    // Оновлення прогресу
     function updateProgress() {
       const inputs = document.querySelectorAll("#products-container input");
       const filled = Array.from(inputs).filter(input => input.value !== "").length;
@@ -652,7 +819,7 @@
       const products = [];
       
       inputs.forEach(input => {
-        const quantity = input.value; // Зберігаємо як string, щоб відрізнити "" від "0"
+        const quantity = input.value;
         products.push({
           name: input.getAttribute("data-product-name"),
           quantity: quantity
@@ -660,17 +827,26 @@
       });
       
       inventoryData[currentFridge.fridgeNumber] = products;
+      hasUnsavedChanges = false;
+      saveDraft();
       
-      const messageDiv = document.getElementById("message");
-      messageDiv.className = "message success";
-      messageDiv.textContent = "✅ Дані збережено! Можете перейти до наступного холодильника або відправити все.";
+      showMessage("✅ Дані збережено! Можете перейти до наступного холодильника.", "success");
       
       setTimeout(() => {
         showFridgeSelector();
       }, 1500);
     }
 
-    // Перевірка незаповнених позицій перед збереженням
+    // Зберегти в Google Sheets зараз
+    async function saveToGoogleSheetsNow() {
+      // Спочатку зберігаємо поточний холодильник
+      saveCurrentFridge();
+      
+      // Потім відправляємо все в Google Sheets
+      await checkAndSaveAll();
+    }
+
+    // Перевірка незаповнених позицій
     function checkAndSaveAll() {
       const unfilled = [];
       
@@ -692,7 +868,7 @@
       }
     }
 
-    // Показати модальне вікно з незаповненими позиціями
+    // Показати модальне вікно незаповнених
     function showUnfilledModal(unfilled) {
       const modal = document.getElementById("unfilled-modal");
       const list = document.getElementById("unfilled-list");
@@ -714,20 +890,20 @@
       document.getElementById("unfilled-modal").classList.remove("active");
     }
 
-    // Підтвердити збереження з незаповненими позиціями
+    // Підтвердити збереження
     function confirmSave() {
       closeUnfilledModal();
       saveAllInventory();
     }
 
-    // Зберегти всі дані в Google Sheets
+    // Зберегти всю інвентаризацію
     async function saveAllInventory() {
       try {
         const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
           fridgeNumber,
           products: inventoryData[fridgeNumber].map(p => ({
             name: p.name,
-            quantity: p.quantity === "" ? 0 : parseFloat(p.quantity) || 0
+            quantity: p.quantity === "" ? 0 : parseFloat(p.quantity.replace(/,/g, '.')) || 0
           }))
         }));
         
@@ -746,10 +922,11 @@
         
         if (result.success) {
           alert(`✅ ${result.message}\n\nАркуш: ${result.sheetName}`);
-          // Очищаємо дані після успішного збереження
           inventoryData = {};
           inventoryDate = null;
-          // Повертаємось до введення дати для нової інвентаризації
+          hasUnsavedChanges = false;
+          clearDraft();
+          stopAutosave();
           document.getElementById("date-modal").classList.add("active");
           document.getElementById("fridge-selector").style.display = "none";
         } else {
@@ -759,6 +936,62 @@
         alert("❌ Помилка збереження: " + error.message);
       }
     }
+
+    // ============ АВТОЗБЕРЕЖЕННЯ ============
+    
+    function startAutosave() {
+      autosaveInterval = setInterval(() => {
+        saveDraft();
+        showAutosaveIndicator();
+      }, 5000); // Кожні 5 секунд
+    }
+
+    function stopAutosave() {
+      if (autosaveInterval) {
+        clearInterval(autosaveInterval);
+      }
+    }
+
+    function saveDraft() {
+      const draft = {
+        inventoryData,
+        inventoryDate,
+        timestamp: new Date().toISOString()
+      };
+      localStorage.setItem("inventory_draft", JSON.stringify(draft));
+    }
+
+    function loadDraft() {
+      const draft = localStorage.getItem("inventory_draft");
+      if (draft) {
+        const data = JSON.parse(draft);
+        if (data.inventoryDate === inventoryDate) {
+          inventoryData = data.inventoryData;
+          console.log("📋 Завантажено чернетку з localStorage");
+        }
+      }
+    }
+
+    function clearDraft() {
+      localStorage.removeItem("inventory_draft");
+    }
+
+    function showAutosaveIndicator() {
+      const indicator = document.getElementById("autosave-indicator");
+      indicator.textContent = "✓ Автозбереження " + new Date().toLocaleTimeString();
+      setTimeout(() => {
+        indicator.textContent = "";
+      }, 3000);
+    }
+
+    // Попередження перед виходом
+    window.addEventListener("beforeunload", (e) => {
+      if (hasUnsavedChanges || Object.keys(inventoryData).length > 0) {
+        e.preventDefault();
+        e.returnValue = "Ваші зміни можуть бути втрачені. Вийти все одно?";
+        return e.returnValue;
+      }
+    });
   </script>
 </body>
 </html>

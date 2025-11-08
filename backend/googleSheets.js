@@ -73,6 +73,94 @@ export async function readProductsFromSheet() {
   }
 }
 
+// 🆕 ЧИТАННЯ ДАНИХ З КОНКРЕТНОГО АРКУША ІНВЕНТАРИЗАЦІЇ
+export async function readInventorySheetData(date) {
+  try {
+    const sheetName = `Інвентаризація ${date}`;
+    
+    // Перевіряємо чи існує такий аркуш
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const existingSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === sheetName
+    );
+    
+    if (!existingSheet) {
+      console.log(`⚠️ Аркуш "${sheetName}" не існує`);
+      return null;
+    }
+    
+    // Читаємо дані з аркуша
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A2:E`,
+    });
+    
+    const rows = response.data.values || [];
+    const products = [];
+    
+    rows.forEach((row, index) => {
+      const fridgeValue = row[0] || "";
+      const name = row[1] || "";
+      const category = row[2] || "";
+      const type = row[3] || "";
+      const quantity = row[4] || "";
+      
+      if (fridgeValue.includes(",")) {
+        const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
+        
+        fridgeNumbers.forEach(fridgeNum => {
+          products.push({
+            rowIndex: index + 2,
+            fridge: fridgeNum,
+            name,
+            category,
+            type,
+            quantity
+          });
+        });
+      } else {
+        products.push({
+          rowIndex: index + 2,
+          fridge: fridgeValue,
+          name,
+          category,
+          type,
+          quantity
+        });
+      }
+    });
+    
+    console.log(`📋 Прочитано ${products.length} продуктів з аркуша "${sheetName}"`);
+    return products;
+  } catch (error) {
+    console.error("❌ Помилка при читанні аркуша інвентаризації:", error);
+    return null;
+  }
+}
+
+// 🆕 ПЕРЕВІРКА ІСНУВАННЯ АРКУША ІНВЕНТАРИЗАЦІЇ
+export async function checkInventorySheetExists(date) {
+  try {
+    const sheetName = `Інвентаризація ${date}`;
+    
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const existingSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === sheetName
+    );
+    
+    return !!existingSheet;
+  } catch (error) {
+    console.error("❌ Помилка при перевірці існування аркуша:", error);
+    return false;
+  }
+}
+
 // 🆕 СТВОРЕННЯ НОВОГО АРКУША ДЛЯ ІНВЕНТАРИЗАЦІЇ
 export async function createInventorySheet(date) {
   try {

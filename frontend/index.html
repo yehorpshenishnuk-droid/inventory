@@ -854,14 +854,16 @@
       inventoryData[currentFridge.fridgeNumber] = products;
       saveDraft();
       
-      // Готуємо дані для відправки
+      // Готуємо дані для відправки - тільки заповнені позиції
       const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
         fridgeNumber,
-        products: inventoryData[fridgeNumber].map(p => ({
-          name: p.name,
-          quantity: p.quantity === "" ? 0 : parseFloat(p.quantity.replace(/,/g, '.')) || 0
-        }))
-      }));
+        products: inventoryData[fridgeNumber]
+          .filter(p => p.quantity !== "") // Відфільтровуємо порожні
+          .map(p => ({
+            name: p.name,
+            quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
+          }))
+      })).filter(f => f.products.length > 0); // Тільки холодильники з даними
       
       try {
         showMessage("🔄 Синхронізація з Google Sheets...", "info");
@@ -943,13 +945,16 @@
     // Зберегти всю інвентаризацію
     async function saveAllInventory() {
       try {
+        // Готуємо дані - тільки заповнені позиції
         const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
           fridgeNumber,
-          products: inventoryData[fridgeNumber].map(p => ({
-            name: p.name,
-            quantity: p.quantity === "" ? 0 : parseFloat(p.quantity.replace(/,/g, '.')) || 0
-          }))
-        }));
+          products: inventoryData[fridgeNumber]
+            .filter(p => p.quantity !== "") // Відфільтровуємо порожні
+            .map(p => ({
+              name: p.name,
+              quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
+            }))
+        })).filter(f => f.products.length > 0); // Тільки холодильники з даними
         
         const response = await fetch(`${API_URL}/api/inventory/save`, {
           method: "POST",

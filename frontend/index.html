@@ -681,11 +681,12 @@
               placeholder="0 або 1+2"
               value="${quantity}"
               data-product-name="${product.name}"
+              data-unit="${product.unit || 'кг'}"
               class="${quantity !== '' ? 'filled' : ''}"
               oninput="handleInput(this)"
               onblur="calculateExpression(this)"
             />
-            <span>кг</span>
+            <span>${product.unit || 'кг'}</span>
           </div>
         `;
         container.appendChild(item);

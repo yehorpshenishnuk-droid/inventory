@@ -24,7 +24,7 @@ export async function readProductsFromSheet() {
   try {
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A2:E`, // Додали колонку E (Одиниці)
+      range: `${MASTER_SHEET_NAME}!A2:F`, // Читаємо включно з F (Одиниці виміру)
     });
 
     const rows = response.data.values || [];
@@ -35,8 +35,8 @@ export async function readProductsFromSheet() {
       const name = row[1] || "";
       const category = row[2] || "";
       const type = row[3] || "";
-      const unit = row[4] || "кг"; // Одиниця виміру, за замовчуванням "кг"
-      const quantity = row[5] || ""; // Якщо є колонка F з кількістю
+      // row[4] - це старі залишки, пропускаємо
+      const unit = row[5] || "кг"; // Колонка F - Одиниці виміру
       
       if (fridgeValue.includes(",")) {
         const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
@@ -49,7 +49,7 @@ export async function readProductsFromSheet() {
             category,
             type,
             unit,
-            quantity
+            quantity: "" // Не читаємо старі залишки
           });
         });
       } else {
@@ -60,7 +60,7 @@ export async function readProductsFromSheet() {
           category,
           type,
           unit,
-          quantity
+          quantity: ""
         });
       }
     });
@@ -185,10 +185,10 @@ export async function createInventorySheet(date, fridgeNumbers) {
       return sheetName;
     }
     
-    // Копіюємо дані з головного аркуша (A, B, C, D, E - включаючи одиниці)
+    // Копіюємо дані з головного аркуша (A, B, C, D, F - БЕЗ колонки E з старими залишками)
     const masterData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A1:E`,
+      range: `${MASTER_SHEET_NAME}!A1:F`,
     });
     
     // Створюємо новий аркуш
@@ -214,8 +214,15 @@ export async function createInventorySheet(date, fridgeNumbers) {
       return numA - numB;
     });
     
-    // Формуємо перший рядок з заголовками
-    const headerRow = rows[0] || ["Холодильник", "Назва", "Категорія", "Тип", "Одиниці"];
+    // Формуємо перший рядок з заголовками (A, B, C, D, F - пропускаємо E)
+    const firstRow = rows[0] || ["Холодильник", "Назва", "Категорія", "Тип", "Залишки", "Одиниці"];
+    const headerRow = [
+      firstRow[0], // A - Холодильник
+      firstRow[1], // B - Назва
+      firstRow[2], // C - Категорія
+      firstRow[3], // D - Тип
+      firstRow[5] || "Одиниці"  // F - Одиниці (пропускаємо E)
+    ];
     
     // Додаємо заголовки для кожного холодильника
     sortedFridges.forEach(fridgeNum => {
@@ -228,9 +235,16 @@ export async function createInventorySheet(date, fridgeNumbers) {
     // Готуємо всі рядки
     const allRows = [headerRow];
     
-    // Додаємо рядки з даними (A, B, C, D, E - включаючи одиниці)
+    // Додаємо рядки з даними (A, B, C, D, F - пропускаємо E)
     for (let i = 1; i < rows.length; i++) {
-      allRows.push(rows[i].slice(0, 5)); // Перші 5 колонок
+      const row = rows[i];
+      allRows.push([
+        row[0] || "", // A
+        row[1] || "", // B
+        row[2] || "", // C
+        row[3] || "", // D
+        row[5] || "кг" // F - Одиниці (пропускаємо E)
+      ]);
     }
     
     // Записуємо всі дані одним запитом

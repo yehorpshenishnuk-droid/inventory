@@ -120,6 +120,7 @@ app.get("/api/inventory/products", async (req, res) => {
               name: product.name,
               category: product.category,
               type: product.type,
+              unit: product.unit || "кг",
               currentQuantity: product.quantity || 0,
               savedQuantity: product.quantity || "", // Збережена кількість
               rowIndex: product.rowIndex
@@ -157,6 +158,7 @@ app.get("/api/inventory/products", async (req, res) => {
         name: product.name,
         category: product.category,
         type: product.type,
+        unit: product.unit || "кг",
         currentQuantity: product.quantity || 0,
         savedQuantity: "", // Немає збереженої кількості
         rowIndex: product.rowIndex

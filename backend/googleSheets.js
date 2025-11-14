@@ -24,12 +24,10 @@ export async function readProductsFromSheet() {
   try {
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A2:E`, // Читаємо з головного аркуша
+      range: `${MASTER_SHEET_NAME}!A2:E`, // Додали колонку E (Одиниці)
     });
 
     const rows = response.data.values || [];
-    
-    // Перетворюємо рядки в об'єкти
     const products = [];
     
     rows.forEach((row, index) => {
@@ -37,9 +35,9 @@ export async function readProductsFromSheet() {
       const name = row[1] || "";
       const category = row[2] || "";
       const type = row[3] || "";
-      const quantity = row[4] || "";
+      const unit = row[4] || "кг"; // Одиниця виміру, за замовчуванням "кг"
+      const quantity = row[5] || ""; // Якщо є колонка F з кількістю
       
-      // Якщо в колонці A записано "2,3" або "2, 3", розбиваємо на окремі холодильники
       if (fridgeValue.includes(",")) {
         const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
         
@@ -50,6 +48,7 @@ export async function readProductsFromSheet() {
             name,
             category,
             type,
+            unit,
             quantity
           });
         });
@@ -60,6 +59,7 @@ export async function readProductsFromSheet() {
           name,
           category,
           type,
+          unit,
           quantity
         });
       }
@@ -92,7 +92,7 @@ export async function readInventorySheetData(date) {
       return null;
     }
     
-    // Читаємо дані з аркуша
+    // Читаємо дані з аркуша (включаючи колонку E з одиницями)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2:E`,
@@ -106,7 +106,10 @@ export async function readInventorySheetData(date) {
       const name = row[1] || "";
       const category = row[2] || "";
       const type = row[3] || "";
-      const quantity = row[4] || "";
+      const unit = row[4] || "кг";
+      
+      // Читаємо залишки з колонок холодильників (F, G, H... залежно від кількості)
+      // Поки що не маємо цих даних, тому quantity = ""
       
       if (fridgeValue.includes(",")) {
         const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
@@ -118,7 +121,8 @@ export async function readInventorySheetData(date) {
             name,
             category,
             type,
-            quantity
+            unit,
+            quantity: "" // Буде заповнено пізніше
           });
         });
       } else {
@@ -128,7 +132,8 @@ export async function readInventorySheetData(date) {
           name,
           category,
           type,
-          quantity
+          unit,
+          quantity: ""
         });
       }
     });
@@ -180,10 +185,10 @@ export async function createInventorySheet(date, fridgeNumbers) {
       return sheetName;
     }
     
-    // Копіюємо дані з головного аркуша (тільки A, B, C, D)
+    // Копіюємо дані з головного аркуша (A, B, C, D, E - включаючи одиниці)
     const masterData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A1:D`,
+      range: `${MASTER_SHEET_NAME}!A1:E`,
     });
     
     // Створюємо новий аркуш
@@ -210,7 +215,7 @@ export async function createInventorySheet(date, fridgeNumbers) {
     });
     
     // Формуємо перший рядок з заголовками
-    const headerRow = rows[0] || ["Холодильник", "Назва", "Категорія", "Тип"];
+    const headerRow = rows[0] || ["Холодильник", "Назва", "Категорія", "Тип", "Одиниці"];
     
     // Додаємо заголовки для кожного холодильника
     sortedFridges.forEach(fridgeNum => {
@@ -223,9 +228,9 @@ export async function createInventorySheet(date, fridgeNumbers) {
     // Готуємо всі рядки
     const allRows = [headerRow];
     
-    // Додаємо рядки з даними (без холодильників і залишків - тільки A, B, C, D)
+    // Додаємо рядки з даними (A, B, C, D, E - включаючи одиниці)
     for (let i = 1; i < rows.length; i++) {
-      allRows.push(rows[i].slice(0, 4)); // Тільки перші 4 колонки
+      allRows.push(rows[i].slice(0, 5)); // Перші 5 колонок
     }
     
     // Записуємо всі дані одним запитом
@@ -247,16 +252,10 @@ export async function createInventorySheet(date, fridgeNumbers) {
 // 📤 ЗАПИС ЗАЛИШКІВ В НОВИЙ АРКУШ ІНВЕНТАРИЗАЦІЇ (ОКРЕМІ КОЛОНКИ)
 export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFridge) {
   try {
-    // inventoryByFridge = {
-    //   "1": [{ name: "Coca Cola", quantity: 1 }],
-    //   "2": [{ name: "Fanta", quantity: 2 }],
-    //   "3": [{ name: "Coca Cola", quantity: 3 }]
-    // }
-    
-    // Читаємо всі дані з нового аркуша
+    // Читаємо всі дані з нового аркуша (включаючи колонку E з одиницями)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:D`,
+      range: `${sheetName}!A2:E`,
     });
     
     const rows = response.data.values || [];
@@ -270,14 +269,14 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     });
     
     // Створюємо відповідність: холодильник → колонка
-    // E = перший холодильник, F = другий холодильник, і т.д.
+    // F = перший холодильник (бо E зайнята одиницями), G = другий холодильник, і т.д.
     const fridgeToColumn = {};
     allFridges.forEach((fridgeNum, index) => {
-      fridgeToColumn[fridgeNum] = String.fromCharCode(69 + index); // 69 = 'E'
+      fridgeToColumn[fridgeNum] = String.fromCharCode(70 + index); // 70 = 'F'
     });
     
     // Колонка для загальної суми - після всіх холодильників
-    const totalColumn = String.fromCharCode(69 + allFridges.length);
+    const totalColumn = String.fromCharCode(70 + allFridges.length);
     
     console.log("📋 Відповідність холодильників та колонок:", fridgeToColumn);
     console.log("📋 Колонка для загальної суми:", totalColumn);

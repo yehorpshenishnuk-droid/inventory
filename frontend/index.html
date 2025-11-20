@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Р†РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЏ СЂРµСЃС‚РѕСЂР°РЅСѓ</title>
+  <title>Інвентаризація ресторану</title>
   <style>
     * {
       margin: 0;
@@ -31,7 +31,7 @@
       text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
     }
     
-    /* РњРѕРґР°Р»СЊРЅС– РІС–РєРЅР° */
+    /* Модальні вікна */
     .modal {
       display: none;
       position: fixed;
@@ -93,7 +93,7 @@
       background: #5568d3;
     }
     
-    /* Р•РєСЂР°РЅ РІРёР±РѕСЂСѓ С…РѕР»РѕРґРёР»СЊРЅРёРєР° */
+    /* Екран вибору холодильника */
     #fridge-selector {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -137,7 +137,7 @@
       opacity: 0.7;
     }
     
-    /* РЎРїРёСЃРѕРє РїСЂРѕРґСѓРєС‚С–РІ */
+    /* Список продуктів */
     #product-list {
       display: none;
       background: white;
@@ -185,7 +185,7 @@
       background: #d97706;
     }
     
-    /* РџРѕС€СѓРє */
+    /* Пошук */
     .search-box {
       margin: 20px 0;
       position: sticky;
@@ -333,7 +333,7 @@
       cursor: not-allowed;
     }
     
-    /* РџСЂРѕРіСЂРµСЃ */
+    /* Прогрес */
     .progress-bar {
       background: #f0f0f0;
       height: 8px;
@@ -383,7 +383,7 @@
       font-size: 1.2em;
     }
     
-    /* РњРѕРґР°Р»СЊРЅРµ РІС–РєРЅРѕ РґР»СЏ РЅРµР·Р°РїРѕРІРЅРµРЅРёС… РїРѕР·РёС†С–Р№ */
+    /* Модальне вікно для незаповнених позицій */
     .unfilled-modal {
       max-height: 400px;
       overflow-y: auto;
@@ -432,66 +432,66 @@
 </head>
 <body>
   <div class="container">
-    <h1>вќ„пёЏ Р†РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЏ С…РѕР»РѕРґРёР»СЊРЅРёРєС–РІ</h1>
+    <h1>❄️ Інвентаризація холодильників</h1>
     
-    <!-- РђРІС‚РѕСЂРёР·Р°С†С–СЏ -->
+    <!-- Авторизація -->
     <div id="auth-modal" class="modal active">
       <div class="modal-content">
-        <h2>рџ”ђ РђРІС‚РѕСЂРёР·Р°С†С–СЏ</h2>
-        <p style="color: #666; margin-bottom: 20px;">Р’РІРµРґС–С‚СЊ РєРѕРґ РґРѕСЃС‚СѓРїСѓ</p>
-        <input type="password" id="auth-code" placeholder="РљРѕРґ РґРѕСЃС‚СѓРїСѓ" />
-        <p id="auth-error" class="error-text" style="display: none;">РќРµРІС–СЂРЅРёР№ РєРѕРґ</p>
-        <button onclick="checkAuth()">РЈРІС–Р№С‚Рё</button>
+        <h2>🔐 Авторизація</h2>
+        <p style="color: #666; margin-bottom: 20px;">Введіть код доступу</p>
+        <input type="password" id="auth-code" placeholder="Код доступу" />
+        <p id="auth-error" class="error-text" style="display: none;">Невірний код</p>
+        <button onclick="checkAuth()">Увійти</button>
       </div>
     </div>
     
-    <!-- РњРѕРґР°Р»СЊРЅРµ РІС–РєРЅРѕ РґР»СЏ РІРІРµРґРµРЅРЅСЏ РґР°С‚Рё -->
+    <!-- Модальне вікно для введення дати -->
     <div id="date-modal" class="modal">
       <div class="modal-content">
-        <h2>рџ“… Р”Р°С‚Р° С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–С—</h2>
-        <p style="color: #666; margin-bottom: 20px;">Р’РІРµРґС–С‚СЊ РґР°С‚Сѓ РїСЂРѕРІРµРґРµРЅРЅСЏ С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–С—</p>
+        <h2>📅 Дата інвентаризації</h2>
+        <p style="color: #666; margin-bottom: 20px;">Введіть дату проведення інвентаризації</p>
         <input type="date" id="inventory-date" />
-        <button onclick="startInventory()">РџРѕС‡Р°С‚Рё С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЋ</button>
+        <button onclick="startInventory()">Почати інвентаризацію</button>
       </div>
     </div>
     
-    <!-- РњРѕРґР°Р»СЊРЅРµ РІС–РєРЅРѕ РґР»СЏ РЅРµР·Р°РїРѕРІРЅРµРЅРёС… РїРѕР·РёС†С–Р№ -->
+    <!-- Модальне вікно для незаповнених позицій -->
     <div id="unfilled-modal" class="modal">
       <div class="modal-content unfilled-modal">
-        <h2>вљ пёЏ РќРµР·Р°РїРѕРІРЅРµРЅС– РїРѕР·РёС†С–С—</h2>
+        <h2>⚠️ Незаповнені позиції</h2>
         <p style="color: #666; margin-bottom: 20px;">
-          Р’Рё РЅРµ Р·Р°РїРѕРІРЅРёР»Рё РЅР°СЃС‚СѓРїРЅС– РїРѕР·РёС†С–С—. РџСЂРѕРґРѕРІР¶РёС‚Рё Р·Р±РµСЂРµР¶РµРЅРЅСЏ?
+          Ви не заповнили наступні позиції. Продовжити збереження?
         </p>
         <div id="unfilled-list" class="unfilled-list"></div>
         <div class="modal-buttons">
-          <button class="btn-secondary" onclick="closeUnfilledModal()">РџРѕРІРµСЂРЅСѓС‚РёСЃСЊ</button>
-          <button onclick="confirmSave()">Р—Р±РµСЂРµРіС‚Рё РІ Р±СѓРґСЊ-СЏРєРѕРјСѓ РІРёРїР°РґРєСѓ</button>
+          <button class="btn-secondary" onclick="closeUnfilledModal()">Повернутись</button>
+          <button onclick="confirmSave()">Зберегти в будь-якому випадку</button>
         </div>
       </div>
     </div>
     
     <div id="loading" class="loading">
-      Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РґР°РЅРёС…...
+      Завантаження даних...
     </div>
     
-    <!-- Р•РєСЂР°РЅ РІРёР±РѕСЂСѓ С…РѕР»РѕРґРёР»СЊРЅРёРєР° -->
+    <!-- Екран вибору холодильника -->
     <div id="fridge-selector" style="display: none;"></div>
     
-    <!-- Р•РєСЂР°РЅ СЃРїРёСЃРєСѓ РїСЂРѕРґСѓРєС‚С–РІ -->
+    <!-- Екран списку продуктів -->
     <div id="product-list">
       <div class="top-buttons">
-        <button class="back-btn" onclick="showFridgeSelector()">в†ђ РќР°Р·Р°Рґ</button>
-        <button class="save-now-btn" onclick="syncToGoogleSheets()">рџ”„ РЎРёРЅС…СЂРѕРЅС–Р·Р°С†С–СЏ</button>
+        <button class="back-btn" onclick="showFridgeSelector()">← Назад</button>
+        <button class="save-now-btn" onclick="syncToGoogleSheets()">🔄 Синхронізація</button>
       </div>
       <h2 id="current-fridge-title"></h2>
       
-      <!-- РџРѕС€СѓРє -->
+      <!-- Пошук -->
       <div class="search-box">
         <input 
           type="text" 
           class="search-input" 
           id="search-input" 
-          placeholder="рџ”Ќ РџРѕС€СѓРє РїСЂРѕРґСѓРєС‚Сѓ (РЅР°РїСЂРёРєР»Р°Рґ: РєРѕРєР°, РїРёРІРѕ, СЃР°Р»Р°С‚...)"
+          placeholder="🔍 Пошук продукту (наприклад: кока, пиво, салат...)"
           oninput="filterProducts()"
         />
         <div class="search-stats">
@@ -505,13 +505,13 @@
       </div>
       <div id="message"></div>
       <div id="products-container"></div>
-      <button class="save-btn" onclick="saveCurrentFridge()">вњ… Р—Р±РµСЂРµРіС‚Рё Р·Р°Р»РёС€РєРё С†СЊРѕРіРѕ С…РѕР»РѕРґРёР»СЊРЅРёРєР°</button>
+      <button class="save-btn" onclick="saveCurrentFridge()">✅ Зберегти залишки цього холодильника</button>
     </div>
   </div>
 
   <script>
     const API_URL = "https://inventory-duab.onrender.com";
-    const AUTH_CODE = "1234"; // Р—РјС–РЅС–С‚СЊ РЅР° РІР°С€ РєРѕРґ
+    const AUTH_CODE = "1234"; // Змініть на ваш код
     
     let allFridges = [];
     let currentFridge = null;
@@ -522,46 +522,36 @@
     let autosaveInterval = null;
     let isExistingInventory = false;
 
-    // РџРµСЂРµРІС–СЂРєР° Р°РІС‚РѕСЂРёР·Р°С†С–С—
+    // Перевірка авторизації
     function checkAuth() {
       const code = document.getElementById("auth-code").value;
       if (code === AUTH_CODE) {
         document.getElementById("auth-modal").classList.remove("active");
         document.getElementById("date-modal").classList.add("active");
-        // Р’СЃС‚Р°РЅРѕРІР»СЋС”РјРѕ СЃСЊРѕРіРѕРґРЅС–С€РЅСЋ РґР°С‚Сѓ
         document.getElementById("inventory-date").valueAsDate = new Date();
       } else {
         document.getElementById("auth-error").style.display = "block";
       }
     }
 
-    // Enter РґР»СЏ Р°РІС‚РѕСЂРёР·Р°С†С–С—
     document.getElementById("auth-code")?.addEventListener("keypress", (e) => {
       if (e.key === "Enter") checkAuth();
     });
 
-    // РџРѕС‡Р°С‚РѕРє С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–С—
     async function startInventory() {
       const dateInput = document.getElementById("inventory-date").value;
       if (!dateInput) {
-        alert("Р‘СѓРґСЊ Р»Р°СЃРєР°, РІРІРµРґС–С‚СЊ РґР°С‚Сѓ С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–С—");
+        alert("Будь ласка, введіть дату інвентаризації");
         return;
       }
       
       inventoryDate = dateInput;
       document.getElementById("date-modal").classList.remove("active");
-      
-      // Р—Р°РІР°РЅС‚Р°Р¶СѓС”РјРѕ С‡РµСЂРЅРµС‚РєСѓ Р· localStorage
       loadDraft();
-      
-      // Р—Р°РІР°РЅС‚Р°Р¶СѓС”РјРѕ РґР°РЅС–
       await loadData();
-      
-      // Р—Р°РїСѓСЃРєР°С”РјРѕ Р°РІС‚РѕР·Р±РµСЂРµР¶РµРЅРЅСЏ
       startAutosave();
     }
 
-    // Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РґР°РЅРёС…
     async function loadData() {
       try {
         const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
@@ -571,7 +561,6 @@
         isExistingInventory = result.existingInventory || false;
         
         if (isExistingInventory) {
-          // РЇРєС‰Рѕ С–СЃРЅСѓС” С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЏ Р·Р° С†СЋ РґР°С‚Сѓ, Р·Р°РІР°РЅС‚Р°Р¶СѓС”РјРѕ Р·Р±РµСЂРµР¶РµРЅС– РґР°РЅС–
           allFridges.forEach(fridge => {
             inventoryData[fridge.fridgeNumber] = fridge.products.map(p => ({
               name: p.name,
@@ -579,18 +568,17 @@
             }));
           });
           
-          showMessage(`рџ“‹ Р—Р°РІР°РЅС‚Р°Р¶РµРЅРѕ С–СЃРЅСѓСЋС‡Сѓ С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЋ Р·Р° ${inventoryDate}`, "info");
+          showMessage(`📋 Завантажено існуючу інвентаризацію за ${inventoryDate}`, "info");
         }
         
         document.getElementById("loading").style.display = "none";
         showFridgeSelector();
       } catch (error) {
         document.getElementById("loading").innerHTML = 
-          `<div class="message error">вќЊ РџРѕРјРёР»РєР° Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ: ${error.message}</div>`;
+          `<div class="message error">❌ Помилка завантаження: ${error.message}</div>`;
       }
     }
 
-    // РџРѕРєР°Р·Р°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ
     function showMessage(text, type = "success") {
       const messageDiv = document.getElementById("message");
       messageDiv.className = `message ${type}`;
@@ -601,7 +589,6 @@
       }, 5000);
     }
 
-    // РџРѕРєР°Р·Р°С‚Рё РµРєСЂР°РЅ РІРёР±РѕСЂСѓ С…РѕР»РѕРґРёР»СЊРЅРёРєС–РІ
     function showFridgeSelector() {
       document.getElementById("fridge-selector").style.display = "grid";
       document.getElementById("product-list").classList.remove("active");
@@ -621,10 +608,10 @@
         }
         
         card.innerHTML = `
-          <div class="fridge-icon">вќ„пёЏ</div>
-          <div class="fridge-number">РҐРѕР»РѕРґРёР»СЊРЅРёРє ${fridge.fridgeNumber}</div>
-          <div class="fridge-count">${fridge.products.length} РїРѕР·РёС†С–Р№</div>
-          ${hasData ? '<div style="margin-top: 10px;">вњ… Р—Р°РїРѕРІРЅРµРЅРѕ</div>' : ''}
+          <div class="fridge-icon">❄️</div>
+          <div class="fridge-number">Холодильник ${fridge.fridgeNumber}</div>
+          <div class="fridge-count">${fridge.products.length} позицій</div>
+          ${hasData ? '<div style="margin-top: 10px;">✅ Заповнено</div>' : ''}
         `;
         
         card.onclick = () => showProducts(fridge);
@@ -634,21 +621,20 @@
       if (Object.keys(inventoryData).length > 0) {
         const saveAllBtn = document.createElement("button");
         saveAllBtn.className = "save-btn";
-        saveAllBtn.textContent = "вњ… РџСЂРѕРІРµСЃС‚Рё С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЋ";
+        saveAllBtn.textContent = "✅ Провести інвентаризацію";
         saveAllBtn.style.gridColumn = "1 / -1";
         saveAllBtn.onclick = checkAndSaveAll;
         selector.appendChild(saveAllBtn);
       }
     }
 
-    // РџРѕРєР°Р·Р°С‚Рё РїСЂРѕРґСѓРєС‚Рё С…РѕР»РѕРґРёР»СЊРЅРёРєР°
     function showProducts(fridge) {
       currentFridge = fridge;
       currentProducts = fridge.products;
       document.getElementById("fridge-selector").style.display = "none";
       document.getElementById("product-list").classList.add("active");
       document.getElementById("current-fridge-title").textContent = 
-        `РҐРѕР»РѕРґРёР»СЊРЅРёРє ${fridge.fridgeNumber}`;
+        `Холодильник ${fridge.fridgeNumber}`;
       
       document.getElementById("search-input").value = "";
       
@@ -673,20 +659,20 @@
             <span class="type">${product.type}</span>
           </div>
           <div class="current-quantity">
-            ${product.currentQuantity && product.currentQuantity !== "0" ? `РџРѕС‚РѕС‡РЅРёР№: ${product.currentQuantity}` : ''}
+            ${product.currentQuantity && product.currentQuantity !== "0" ? `Поточний: ${product.currentQuantity}` : ''}
           </div>
           <div class="quantity-input">
             <input 
               type="text" 
-              placeholder="0 Р°Р±Рѕ 1+2"
+              placeholder="0 або 1+2"
               value="${quantity}"
               data-product-name="${product.name}"
-              data-unit="${product.unit || 'РєРі'}"
+              data-unit="${product.unit || 'кг'}"
               class="${quantity !== '' ? 'filled' : ''}"
               oninput="handleInput(this)"
               onblur="calculateExpression(this)"
             />
-            <span>${product.unit || 'РєРі'}</span>
+            <span>${product.unit || 'кг'}</span>
           </div>
         `;
         container.appendChild(item);
@@ -696,26 +682,16 @@
       updateSearchStats();
     }
 
-    // РћР±СЂРѕР±РєР° РІРІРµРґРµРЅРЅСЏ
     function handleInput(input) {
       hasUnsavedChanges = true;
-      
-      // РќРѕСЂРјР°Р»С–Р·Р°С†С–СЏ: Р·Р°РјС–РЅР° РєРѕРјРё РЅР° РєСЂР°РїРєСѓ
       let value = input.value.replace(/,/g, '.');
-      
-      // Р’РёРґР°Р»РµРЅРЅСЏ РїСЂРѕР±С–Р»С–РІ С‚Р° С‚РµРєСЃС‚Сѓ (РєРі, Рі, С‚.Рґ.)
       value = value.replace(/[^\d+\-*/().]/g, '');
-      
       input.value = value;
-      
-      // Р’РёРґР°Р»РµРЅРЅСЏ РєР»Р°СЃСѓ РїРѕРјРёР»РєРё
       input.classList.remove("error");
-      
       updateProgress();
       markAsFilled(input);
     }
 
-    // РћР±С‡РёСЃР»РµРЅРЅСЏ РІРёСЂР°Р·С–РІ (1+2, 5+3.5)
     function calculateExpression(input) {
       const value = input.value.trim();
       
@@ -724,7 +700,6 @@
         return;
       }
       
-      // РЇРєС‰Рѕ С” РјР°С‚РµРјР°С‚РёС‡РЅС– РѕРїРµСЂР°С‚РѕСЂРё, РѕР±С‡РёСЃР»СЋС”РјРѕ
       if (/[+\-*/]/.test(value)) {
         try {
           const result = eval(value);
@@ -738,7 +713,6 @@
           input.classList.add("error");
         }
       } else {
-        // РџРµСЂРµРІС–СЂРєР° С‡Рё С†Рµ С‡РёСЃР»Рѕ
         const num = parseFloat(value);
         if (isNaN(num)) {
           input.classList.add("error");
@@ -751,7 +725,6 @@
       updateProgress();
     }
 
-    // РџРѕР·РЅР°С‡РёС‚Рё РїРѕР»Рµ СЏРє Р·Р°РїРѕРІРЅРµРЅРµ
     function markAsFilled(input) {
       if (input.value !== "") {
         input.classList.add("filled");
@@ -760,7 +733,6 @@
       }
     }
 
-    // Р¤С–Р»СЊС‚СЂР°С†С–СЏ РїСЂРѕРґСѓРєС‚С–РІ
     function filterProducts() {
       const searchTerm = document.getElementById("search-input").value.toLowerCase();
       const items = document.querySelectorAll(".product-item");
@@ -787,7 +759,6 @@
       updateSearchStats(visibleCount, items.length);
     }
 
-    // РћРЅРѕРІР»РµРЅРЅСЏ СЃС‚Р°С‚РёСЃС‚РёРєРё РїРѕС€СѓРєСѓ
     function updateSearchStats(visible, total) {
       const statsDiv = document.getElementById("search-stats-text");
       const searchTerm = document.getElementById("search-input").value;
@@ -798,13 +769,12 @@
       }
       
       if (searchTerm) {
-        statsDiv.textContent = `Р—РЅР°Р№РґРµРЅРѕ: ${visible} Р· ${total} РїРѕР·РёС†С–Р№`;
+        statsDiv.textContent = `Знайдено: ${visible} з ${total} позицій`;
       } else {
-        statsDiv.textContent = `Р’СЃСЊРѕРіРѕ РїРѕР·РёС†С–Р№: ${total}`;
+        statsDiv.textContent = `Всього позицій: ${total}`;
       }
     }
 
-    // РћРЅРѕРІР»РµРЅРЅСЏ РїСЂРѕРіСЂРµСЃСѓ
     function updateProgress() {
       const inputs = document.querySelectorAll("#products-container input");
       const filled = Array.from(inputs).filter(input => input.value !== "").length;
@@ -814,7 +784,6 @@
       document.getElementById("progress-fill").style.width = percent + "%";
     }
 
-    // Р—Р±РµСЂРµРіС‚Рё РґР°РЅС– РїРѕС‚РѕС‡РЅРѕРіРѕ С…РѕР»РѕРґРёР»СЊРЅРёРєР°
     function saveCurrentFridge() {
       const inputs = document.querySelectorAll("#products-container input");
       const products = [];
@@ -831,16 +800,14 @@
       hasUnsavedChanges = false;
       saveDraft();
       
-      showMessage("вњ… Р”Р°РЅС– Р·Р±РµСЂРµР¶РµРЅРѕ! РњРѕР¶РµС‚Рµ РїРµСЂРµР№С‚Рё РґРѕ РЅР°СЃС‚СѓРїРЅРѕРіРѕ С…РѕР»РѕРґРёР»СЊРЅРёРєР°.", "success");
+      showMessage("✅ Дані збережено! Можете перейти до наступного холодильника.", "success");
       
       setTimeout(() => {
         showFridgeSelector();
       }, 1500);
     }
 
-    // РЎРёРЅС…СЂРѕРЅС–Р·Р°С†С–СЏ Р· Google Sheets (Р±РµР· Р·Р°РєСЂРёС‚С‚СЏ С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–С—)
     async function syncToGoogleSheets() {
-      // РЎРїРѕС‡Р°С‚РєСѓ Р·Р±РµСЂС–РіР°С”РјРѕ РїРѕС‚РѕС‡РЅРёР№ С…РѕР»РѕРґРёР»СЊРЅРёРє Р»РѕРєР°Р»СЊРЅРѕ
       const inputs = document.querySelectorAll("#products-container input");
       const products = [];
       
@@ -855,19 +822,18 @@
       inventoryData[currentFridge.fridgeNumber] = products;
       saveDraft();
       
-      // Р“РѕС‚СѓС”РјРѕ РґР°РЅС– РґР»СЏ РІС–РґРїСЂР°РІРєРё - С‚С–Р»СЊРєРё Р·Р°РїРѕРІРЅРµРЅС– РїРѕР·РёС†С–С—
       const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
         fridgeNumber,
         products: inventoryData[fridgeNumber]
-          .filter(p => p.quantity !== "") // Р’С–РґС„С–Р»СЊС‚СЂРѕРІСѓС”РјРѕ РїРѕСЂРѕР¶РЅС–
+          .filter(p => p.quantity !== "")
           .map(p => ({
             name: p.name,
             quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
           }))
-      })).filter(f => f.products.length > 0); // РўС–Р»СЊРєРё С…РѕР»РѕРґРёР»СЊРЅРёРєРё Р· РґР°РЅРёРјРё
+      })).filter(f => f.products.length > 0);
       
       try {
-        showMessage("рџ”„ РЎРёРЅС…СЂРѕРЅС–Р·Р°С†С–СЏ Р· Google Sheets...", "info");
+        showMessage("🔄 Синхронізація з Google Sheets...", "info");
         
         const response = await fetch(`${API_URL}/api/inventory/save`, {
           method: "POST",
@@ -883,17 +849,16 @@
         const result = await response.json();
         
         if (result.success) {
-          showMessage("вњ… РЎРёРЅС…СЂРѕРЅС–Р·РѕРІР°РЅРѕ Р· Google Sheets!", "success");
+          showMessage("✅ Синхронізовано з Google Sheets!", "success");
           hasUnsavedChanges = false;
         } else {
-          showMessage("вќЊ РџРѕРјРёР»РєР° СЃРёРЅС…СЂРѕРЅС–Р·Р°С†С–С—: " + result.error, "error");
+          showMessage("❌ Помилка синхронізації: " + result.error, "error");
         }
       } catch (error) {
-        showMessage("вќЊ РџРѕРјРёР»РєР° СЃРёРЅС…СЂРѕРЅС–Р·Р°С†С–С—: " + error.message, "error");
+        showMessage("❌ Помилка синхронізації: " + error.message, "error");
       }
     }
 
-    // РџРµСЂРµРІС–СЂРєР° РЅРµР·Р°РїРѕРІРЅРµРЅРёС… РїРѕР·РёС†С–Р№
     function checkAndSaveAll() {
       const unfilled = [];
       
@@ -915,7 +880,6 @@
       }
     }
 
-    // РџРѕРєР°Р·Р°С‚Рё РјРѕРґР°Р»СЊРЅРµ РІС–РєРЅРѕ РЅРµР·Р°РїРѕРІРЅРµРЅРёС…
     function showUnfilledModal(unfilled) {
       const modal = document.getElementById("unfilled-modal");
       const list = document.getElementById("unfilled-list");
@@ -925,37 +889,33 @@
       unfilled.forEach(item => {
         const div = document.createElement("div");
         div.className = "unfilled-item";
-        div.textContent = `РҐРѕР»РѕРґРёР»СЊРЅРёРє ${item.fridge}: ${item.name}`;
+        div.textContent = `Холодильник ${item.fridge}: ${item.name}`;
         list.appendChild(div);
       });
       
       modal.classList.add("active");
     }
 
-    // Р—Р°РєСЂРёС‚Рё РјРѕРґР°Р»СЊРЅРµ РІС–РєРЅРѕ
     function closeUnfilledModal() {
       document.getElementById("unfilled-modal").classList.remove("active");
     }
 
-    // РџС–РґС‚РІРµСЂРґРёС‚Рё Р·Р±РµСЂРµР¶РµРЅРЅСЏ
     function confirmSave() {
       closeUnfilledModal();
       saveAllInventory();
     }
 
-    // Р—Р±РµСЂРµРіС‚Рё РІСЃСЋ С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЋ
     async function saveAllInventory() {
       try {
-        // Р“РѕС‚СѓС”РјРѕ РґР°РЅС– - С‚С–Р»СЊРєРё Р·Р°РїРѕРІРЅРµРЅС– РїРѕР·РёС†С–С—
         const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
           fridgeNumber,
           products: inventoryData[fridgeNumber]
-            .filter(p => p.quantity !== "") // Р’С–РґС„С–Р»СЊС‚СЂРѕРІСѓС”РјРѕ РїРѕСЂРѕР¶РЅС–
+            .filter(p => p.quantity !== "")
             .map(p => ({
               name: p.name,
               quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
             }))
-        })).filter(f => f.products.length > 0); // РўС–Р»СЊРєРё С…РѕР»РѕРґРёР»СЊРЅРёРєРё Р· РґР°РЅРёРјРё
+        })).filter(f => f.products.length > 0);
         
         const response = await fetch(`${API_URL}/api/inventory/save`, {
           method: "POST",
@@ -971,7 +931,7 @@
         const result = await response.json();
         
         if (result.success) {
-          alert(`вњ… ${result.message}\n\nРђСЂРєСѓС€: ${result.sheetName}`);
+          alert(`✅ ${result.message}\n\nАркуш: ${result.sheetName}`);
           inventoryData = {};
           inventoryDate = null;
           hasUnsavedChanges = false;
@@ -980,20 +940,18 @@
           document.getElementById("date-modal").classList.add("active");
           document.getElementById("fridge-selector").style.display = "none";
         } else {
-          alert("вќЊ РџРѕРјРёР»РєР°: " + result.error);
+          alert("❌ Помилка: " + result.error);
         }
       } catch (error) {
-        alert("вќЊ РџРѕРјРёР»РєР° Р·Р±РµСЂРµР¶РµРЅРЅСЏ: " + error.message);
+        alert("❌ Помилка збереження: " + error.message);
       }
     }
 
-    // ============ РђР’РўРћР—Р‘Р•Р Р•Р–Р•РќРќРЇ ============
-    
     function startAutosave() {
       autosaveInterval = setInterval(() => {
         saveDraft();
         showAutosaveIndicator();
-      }, 5000); // РљРѕР¶РЅС– 5 СЃРµРєСѓРЅРґ
+      }, 5000);
     }
 
     function stopAutosave() {
@@ -1017,7 +975,7 @@
         const data = JSON.parse(draft);
         if (data.inventoryDate === inventoryDate) {
           inventoryData = data.inventoryData;
-          console.log("рџ“‹ Р—Р°РІР°РЅС‚Р°Р¶РµРЅРѕ С‡РµСЂРЅРµС‚РєСѓ Р· localStorage");
+          console.log("📋 Завантажено чернетку з localStorage");
         }
       }
     }
@@ -1028,17 +986,16 @@
 
     function showAutosaveIndicator() {
       const indicator = document.getElementById("autosave-indicator");
-      indicator.textContent = "вњ“ РђРІС‚РѕР·Р±РµСЂРµР¶РµРЅРЅСЏ " + new Date().toLocaleTimeString();
+      indicator.textContent = "✓ Автозбереження " + new Date().toLocaleTimeString();
       setTimeout(() => {
         indicator.textContent = "";
       }, 3000);
     }
 
-    // РџРѕРїРµСЂРµРґР¶РµРЅРЅСЏ РїРµСЂРµРґ РІРёС…РѕРґРѕРј
     window.addEventListener("beforeunload", (e) => {
       if (hasUnsavedChanges || Object.keys(inventoryData).length > 0) {
         e.preventDefault();
-        e.returnValue = "Р’Р°С€С– Р·РјС–РЅРё РјРѕР¶СѓС‚СЊ Р±СѓС‚Рё РІС‚СЂР°С‡РµРЅС–. Р’РёР№С‚Рё РІСЃРµ РѕРґРЅРѕ?";
+        e.returnValue = "Ваші зміни можуть бути втрачені. Вийти все одно?";
         return e.returnValue;
       }
     });

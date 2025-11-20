@@ -4,10 +4,10 @@ import { google } from "googleapis";
 // === Google Sheets credentials ===
 const CREDENTIALS_PATH = "/etc/secrets/credentials.json";
 
-// Р§РёС‚Р°РµРј JSON СЃ СЃРµСЂРІРёСЃРЅС‹Рј Р°РєРєР°СѓРЅС‚РѕРј
+// Читаем JSON с сервисным аккаунтом
 const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
 
-// РђРІС‚РѕСЂРёР·Р°С†РёСЏ Google API
+// Авторизация Google API
 const auth = new google.auth.GoogleAuth({
   credentials,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
@@ -15,16 +15,16 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
-// === РћСЃРЅРѕРІРЅР°СЏ Р»РѕРіРёРєР° ===
+// === Основная логика ===
 const SPREADSHEET_ID = "1eiJw3ADAdq6GfQxsbJp0STDsc1MyJfPXCf2caQy8khw";
-const MASTER_SHEET_NAME = "Р›РёСЃС‚1"; // Р“РѕР»РѕРІРЅРёР№ Р°СЂРєСѓС€ Р· С€Р°Р±Р»РѕРЅРѕРј
+const MASTER_SHEET_NAME = "Master"; // Головний аркуш з шаблоном - ПЕРЕЙМЕНУЙ "Лист1" на "Master" в Google Sheets!
 
-// рџ“Ґ Р§РРўРђРќРќРЇ Р”РђРќРРҐ Р— GOOGLE SHEETS
+// 📥 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS
 export async function readProductsFromSheet() {
   try {
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A2:F`, // Р§РёС‚Р°С”РјРѕ РІРєР»СЋС‡РЅРѕ Р· F (РћРґРёРЅРёС†С– РІРёРјС–СЂСѓ)
+      range: `${MASTER_SHEET_NAME}!A2:F`, // Читаємо включно з F (Одиниці виміру)
     });
 
     const rows = response.data.values || [];
@@ -35,8 +35,8 @@ export async function readProductsFromSheet() {
       const name = row[1] || "";
       const category = row[2] || "";
       const type = row[3] || "";
-      // row[4] - С†Рµ СЃС‚Р°СЂС– Р·Р°Р»РёС€РєРё, РїСЂРѕРїСѓСЃРєР°С”РјРѕ
-      const unit = row[5] || "РєРі"; // РљРѕР»РѕРЅРєР° F - РћРґРёРЅРёС†С– РІРёРјС–СЂСѓ
+      // row[4] - це старі залишки, пропускаємо
+      const unit = row[5] || "кг"; // Колонка F - Одиниці виміру
       
       if (fridgeValue.includes(",")) {
         const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
@@ -49,7 +49,7 @@ export async function readProductsFromSheet() {
             category,
             type,
             unit,
-            quantity: "" // РќРµ С‡РёС‚Р°С”РјРѕ СЃС‚Р°СЂС– Р·Р°Р»РёС€РєРё
+            quantity: "" // Не читаємо старі залишки
           });
         });
       } else {
@@ -65,20 +65,20 @@ export async function readProductsFromSheet() {
       }
     });
 
-    console.log(`рџ“‹ РџСЂРѕС‡РёС‚Р°РЅРѕ ${products.length} РїСЂРѕРґСѓРєС‚С–РІ Р· Google Sheets`);
+    console.log(`📋 Прочитано ${products.length} продуктів з Google Sheets`);
     return products;
   } catch (error) {
-    console.error("вќЊ РџРѕРјРёР»РєР° РїСЂРё С‡РёС‚Р°РЅРЅС– РґР°РЅРёС… Р· Google Sheets:", error);
+    console.error("❌ Помилка при читанні даних з Google Sheets:", error);
     throw error;
   }
 }
 
-// рџ†• Р§РРўРђРќРќРЇ Р”РђРќРРҐ Р— РљРћРќРљР Р•РўРќРћР“Рћ РђР РљРЈРЁРђ Р†РќР’Р•РќРўРђР РР—РђР¦Р†Р‡
+// 🆕 ЧИТАННЯ ДАНИХ З КОНКРЕТНОГО АРКУША ІНВЕНТАРИЗАЦІЇ
 export async function readInventorySheetData(date) {
   try {
-    const sheetName = `Р†РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЏ ${date}`;
+    const sheetName = `Інвентаризація ${date}`;
     
-    // РџРµСЂРµРІС–СЂСЏС”РјРѕ С‡Рё С–СЃРЅСѓС” С‚Р°РєРёР№ Р°СЂРєСѓС€
+    // Перевіряємо чи існує такий аркуш
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID
     });
@@ -88,11 +88,11 @@ export async function readInventorySheetData(date) {
     );
     
     if (!existingSheet) {
-      console.log(`вљ пёЏ РђСЂРєСѓС€ "${sheetName}" РЅРµ С–СЃРЅСѓС”`);
+      console.log(`⚠️ Аркуш "${sheetName}" не існує`);
       return null;
     }
     
-    // Р§РёС‚Р°С”РјРѕ РґР°РЅС– Р· Р°СЂРєСѓС€Р° (РІРєР»СЋС‡Р°СЋС‡Рё РєРѕР»РѕРЅРєСѓ E Р· РѕРґРёРЅРёС†СЏРјРё)
+    // Читаємо дані з аркуша (включаючи колонку E з одиницями)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2:E`,
@@ -106,10 +106,10 @@ export async function readInventorySheetData(date) {
       const name = row[1] || "";
       const category = row[2] || "";
       const type = row[3] || "";
-      const unit = row[4] || "РєРі";
+      const unit = row[4] || "кг";
       
-      // Р§РёС‚Р°С”РјРѕ Р·Р°Р»РёС€РєРё Р· РєРѕР»РѕРЅРѕРє С…РѕР»РѕРґРёР»СЊРЅРёРєС–РІ (F, G, H... Р·Р°Р»РµР¶РЅРѕ РІС–Рґ РєС–Р»СЊРєРѕСЃС‚С–)
-      // РџРѕРєРё С‰Рѕ РЅРµ РјР°С”РјРѕ С†РёС… РґР°РЅРёС…, С‚РѕРјСѓ quantity = ""
+      // Читаємо залишки з колонок холодильників (F, G, H... залежно від кількості)
+      // Поки що не маємо цих даних, тому quantity = ""
       
       if (fridgeValue.includes(",")) {
         const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
@@ -122,7 +122,7 @@ export async function readInventorySheetData(date) {
             category,
             type,
             unit,
-            quantity: "" // Р‘СѓРґРµ Р·Р°РїРѕРІРЅРµРЅРѕ РїС–Р·РЅС–С€Рµ
+            quantity: "" // Буде заповнено пізніше
           });
         });
       } else {
@@ -138,18 +138,18 @@ export async function readInventorySheetData(date) {
       }
     });
     
-    console.log(`рџ“‹ РџСЂРѕС‡РёС‚Р°РЅРѕ ${products.length} РїСЂРѕРґСѓРєС‚С–РІ Р· Р°СЂРєСѓС€Р° "${sheetName}"`);
+    console.log(`📋 Прочитано ${products.length} продуктів з аркуша "${sheetName}"`);
     return products;
   } catch (error) {
-    console.error("вќЊ РџРѕРјРёР»РєР° РїСЂРё С‡РёС‚Р°РЅРЅС– Р°СЂРєСѓС€Р° С–РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–С—:", error);
+    console.error("❌ Помилка при читанні аркуша інвентаризації:", error);
     return null;
   }
 }
 
-// рџ†• РџР•Р Р•Р’Р†Р РљРђ Р†РЎРќРЈР’РђРќРќРЇ РђР РљРЈРЁРђ Р†РќР’Р•РќРўРђР РР—РђР¦Р†Р‡
+// 🆕 ПЕРЕВІРКА ІСНУВАННЯ АРКУША ІНВЕНТАРИЗАЦІЇ
 export async function checkInventorySheetExists(date) {
   try {
-    const sheetName = `Р†РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЏ ${date}`;
+    const sheetName = `Інвентаризація ${date}`;
     
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID
@@ -161,17 +161,17 @@ export async function checkInventorySheetExists(date) {
     
     return !!existingSheet;
   } catch (error) {
-    console.error("вќЊ РџРѕРјРёР»РєР° РїСЂРё РїРµСЂРµРІС–СЂС†С– С–СЃРЅСѓРІР°РЅРЅСЏ Р°СЂРєСѓС€Р°:", error);
+    console.error("❌ Помилка при перевірці існування аркуша:", error);
     return false;
   }
 }
 
-// рџ†• РЎРўР’РћР Р•РќРќРЇ РќРћР’РћР“Рћ РђР РљРЈРЁРђ Р”Р›РЇ Р†РќР’Р•РќРўРђР РР—РђР¦Р†Р‡
+// 🆕 СТВОРЕННЯ НОВОГО АРКУША ДЛЯ ІНВЕНТАРИЗАЦІЇ
 export async function createInventorySheet(date) {
   try {
-    const sheetName = `Р†РЅРІРµРЅС‚Р°СЂРёР·Р°С†С–СЏ ${date}`;
+    const sheetName = `Інвентаризація ${date}`;
     
-    // РџРµСЂРµРІС–СЂСЏС”РјРѕ С‡Рё С–СЃРЅСѓС” РІР¶Рµ С‚Р°РєРёР№ Р°СЂРєСѓС€
+    // Перевіряємо чи існує вже такий аркуш
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID
     });
@@ -181,17 +181,17 @@ export async function createInventorySheet(date) {
     );
     
     if (existingSheet) {
-      console.log(`вљ пёЏ РђСЂРєСѓС€ "${sheetName}" РІР¶Рµ С–СЃРЅСѓС”`);
+      console.log(`⚠️ Аркуш "${sheetName}" вже існує`);
       return sheetName;
     }
     
-    // Р§РёС‚Р°С”РјРѕ Р’РЎР† РґР°РЅС– Р· РіРѕР»РѕРІРЅРѕРіРѕ Р°СЂРєСѓС€Р° (РІРµСЃСЊ РїРµСЂС€РёР№ СЂСЏРґРѕРє Р· Р·Р°РіРѕР»РѕРІРєР°РјРё)
+    // Читаємо ВСІ дані з головного аркуша (весь перший рядок з заголовками)
     const masterData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A1:Z`, // Р§РёС‚Р°С”РјРѕ РІСЃС– РєРѕР»РѕРЅРєРё РґРѕ Z
+      range: `${MASTER_SHEET_NAME}!A1:Z`, // Читаємо всі колонки до Z
     });
     
-    // РЎС‚РІРѕСЂСЋС”РјРѕ РЅРѕРІРёР№ Р°СЂРєСѓС€
+    // Створюємо новий аркуш
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
@@ -208,10 +208,10 @@ export async function createInventorySheet(date) {
     const rows = masterData.data.values || [];
     
     if (rows.length === 0) {
-      throw new Error("РќРµРјР°С” РґР°РЅРёС… РІ РіРѕР»РѕРІРЅРѕРјСѓ Р°СЂРєСѓС€С–");
+      throw new Error("Немає даних в головному аркуші");
     }
     
-    // РљРѕРїС–СЋС”РјРѕ Р’РЎР† СЂСЏРґРєРё СЏРє С” (РІРєР»СЋС‡РЅРѕ Р· Р·Р°РіРѕР»РѕРІРєР°РјРё С…РѕР»РѕРґРёР»СЊРЅРёРєС–РІ)
+    // Копіюємо ВСІ рядки як є (включно з заголовками холодильників)
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1`,
@@ -219,18 +219,18 @@ export async function createInventorySheet(date) {
       requestBody: { values: rows }
     });
     
-    console.log(`вњ… РЎС‚РІРѕСЂРµРЅРѕ РЅРѕРІРёР№ Р°СЂРєСѓС€: ${sheetName} (СЃРєРѕРїС–Р№РѕРІР°РЅРѕ ${rows.length} СЂСЏРґРєС–РІ)`);
+    console.log(`✅ Створено новий аркуш: ${sheetName} (скопійовано ${rows.length} рядків)`);
     return sheetName;
   } catch (error) {
-    console.error("вќЊ РџРѕРјРёР»РєР° РїСЂРё СЃС‚РІРѕСЂРµРЅРЅС– Р°СЂРєСѓС€Р°:", error);
+    console.error("❌ Помилка при створенні аркуша:", error);
     throw error;
   }
 }
 
-// рџ“¤ Р—РђРџРРЎ Р—РђР›РРЁРљР†Р’ Р’ РќРћР’РР™ РђР РљРЈРЁ Р†РќР’Р•РќРўРђР РР—РђР¦Р†Р‡ (РђР’РўРћРњРђРўРР§РќРР™ РџРћРЁРЈРљ РљРћР›РћРќРћРљ)
+// 📤 ЗАПИС ЗАЛИШКІВ В НОВИЙ АРКУШ ІНВЕНТАРИЗАЦІЇ (АВТОМАТИЧНИЙ ПОШУК КОЛОНОК)
 export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFridge) {
   try {
-    // Р§РёС‚Р°С”РјРѕ Р·Р°РіРѕР»РѕРІРєРё (РїРµСЂС€РёР№ СЂСЏРґРѕРє)
+    // Читаємо заголовки (перший рядок)
     const headerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1:Z1`,
@@ -238,33 +238,33 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     
     const headers = headerResponse.data.values?.[0] || [];
     
-    // Р—РЅР°С…РѕРґРёРјРѕ СЏРєС– РєРѕР»РѕРЅРєРё РІС–РґРїРѕРІС–РґР°СЋС‚СЊ СЏРєРёРј С…РѕР»РѕРґРёР»СЊРЅРёРєР°Рј
+    // Знаходимо які колонки відповідають яким холодильникам
     const fridgeColumns = {};
     let totalColumn = null;
     
     headers.forEach((header, index) => {
       const columnLetter = String.fromCharCode(65 + index); // A=65, B=66...
       
-      // РЁСѓРєР°С”РјРѕ РєРѕР»РѕРЅРєРё С‚РёРїСѓ "РҐРѕР»РѕРґРёР»СЊРЅРёРє 1", "РҐРѕР»РѕРґРёР»СЊРЅРёРє 2" С– С‚.Рґ.
-      const match = header?.match(/РҐРѕР»РѕРґРёР»СЊРЅРёРє\s+(\d+)/i);
+      // Шукаємо колонки типу "Холодильник 1", "Холодильник 2" і т.д.
+      const match = header?.match(/Холодильник\s+(\d+)/i);
       if (match) {
         const fridgeNum = match[1];
         fridgeColumns[fridgeNum] = columnLetter;
-        console.log(`рџ“‹ Р—РЅР°Р№РґРµРЅРѕ: РҐРѕР»РѕРґРёР»СЊРЅРёРє ${fridgeNum} в†’ РєРѕР»РѕРЅРєР° ${columnLetter}`);
+        console.log(`📋 Знайдено: Холодильник ${fridgeNum} → колонка ${columnLetter}`);
       }
       
-      // РЁСѓРєР°С”РјРѕ РєРѕР»РѕРЅРєСѓ "Р—Р°Р»РёС€РєРё"
-      if (header?.toLowerCase().includes('Р·Р°Р»РёС€РєРё')) {
+      // Шукаємо колонку "Залишки"
+      if (header?.toLowerCase().includes('залишки')) {
         totalColumn = columnLetter;
-        console.log(`рџ“‹ Р—РЅР°Р№РґРµРЅРѕ: Р—Р°Р»РёС€РєРё в†’ РєРѕР»РѕРЅРєР° ${columnLetter}`);
+        console.log(`📋 Знайдено: Залишки → колонка ${columnLetter}`);
       }
     });
     
     if (Object.keys(fridgeColumns).length === 0) {
-      throw new Error("РќРµ Р·РЅР°Р№РґРµРЅРѕ Р¶РѕРґРЅРѕС— РєРѕР»РѕРЅРєРё Р· С…РѕР»РѕРґРёР»СЊРЅРёРєР°РјРё");
+      throw new Error("Не знайдено жодної колонки з холодильниками");
     }
     
-    // Р§РёС‚Р°С”РјРѕ РІСЃС– РґР°РЅС– РїСЂРѕРґСѓРєС‚С–РІ (Р· РґСЂСѓРіРѕРіРѕ СЂСЏРґРєР°)
+    // Читаємо всі дані продуктів (з другого рядка)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2:E`,
@@ -272,7 +272,7 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     
     const rows = response.data.values || [];
     
-    // РЎС‚РІРѕСЂСЋС”РјРѕ Map РґР»СЏ С€РІРёРґРєРѕРіРѕ РїРѕС€СѓРєСѓ РїРѕ РєРѕР¶РЅРѕРјСѓ С…РѕР»РѕРґРёР»СЊРЅРёРєСѓ
+    // Створюємо Map для швидкого пошуку по кожному холодильнику
     const dataByFridge = {};
     Object.keys(inventoryByFridge).forEach(fridgeNum => {
       dataByFridge[fridgeNum] = new Map();
@@ -281,16 +281,16 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
       });
     });
     
-    // Р“РѕС‚СѓС”РјРѕ РјР°СЃРёРІ РґР»СЏ batch update
+    // Готуємо масив для batch update
     const updates = [];
     
     rows.forEach((row, index) => {
-      const productName = row[1]; // РљРѕР»РѕРЅРєР° B - РќР°Р·РІР°
+      const productName = row[1]; // Колонка B - Назва
       const rowIndex = index + 2;
       
       let totalForProduct = 0;
       
-      // Р”Р»СЏ РєРѕР¶РЅРѕРіРѕ С…РѕР»РѕРґРёР»СЊРЅРёРєР° Р·Р°РїРёСЃСѓС”РјРѕ Р№РѕРіРѕ РґР°РЅС–
+      // Для кожного холодильника записуємо його дані
       Object.keys(fridgeColumns).forEach(fridgeNum => {
         const column = fridgeColumns[fridgeNum];
         
@@ -304,7 +304,7 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
         }
       });
       
-      // Р—Р°РїРёСЃСѓС”РјРѕ Р·Р°РіР°Р»СЊРЅСѓ СЃСѓРјСѓ РІ РєРѕР»РѕРЅРєСѓ "Р—Р°Р»РёС€РєРё"
+      // Записуємо загальну суму в колонку "Залишки"
       if (totalForProduct > 0 && totalColumn) {
         updates.push({
           range: `${sheetName}!${totalColumn}${rowIndex}`,
@@ -314,11 +314,11 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     });
     
     if (updates.length === 0) {
-      console.log("вљ пёЏ РќРµРјР°С” РґР°РЅРёС… РґР»СЏ Р·Р°РїРёСЃСѓ");
+      console.log("⚠️ Немає даних для запису");
       return;
     }
     
-    // Batch update - РѕРЅРѕРІР»СЋС”РјРѕ РІСЃС– РєРѕРјС–СЂРєРё РѕРґРЅРёРј Р·Р°РїРёС‚РѕРј
+    // Batch update - оновлюємо всі комірки одним запитом
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
@@ -327,46 +327,46 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
       }
     });
     
-    console.log(`вњ… РћРЅРѕРІР»РµРЅРѕ ${updates.length} РєРѕРјС–СЂРѕРє Сѓ Р°СЂРєСѓС€С– "${sheetName}"`);
+    console.log(`✅ Оновлено ${updates.length} комірок у аркуші "${sheetName}"`);
   } catch (error) {
-    console.error("вќЊ РџРѕРјРёР»РєР° РїСЂРё Р·Р°РїРёСЃСѓ Р·Р°Р»РёС€РєС–РІ:", error);
+    console.error("❌ Помилка при запису залишків:", error);
     throw error;
   }
 }
 
-// рџ“¤ Р—РђРџРРЎ Р—РђР›РРЁРљР†Р’ Р’ РљРћР›РћРќРљРЈ E
+// 📤 ЗАПИС ЗАЛИШКІВ В КОЛОНКУ E
 export async function writeQuantitiesToSheet(quantities) {
   try {
-    // quantities - С†Рµ РјР°СЃРёРІ РѕР±'С”РєС‚С–РІ { name: "РќР°Р·РІР° РїСЂРѕРґСѓРєС‚Сѓ", totalQuantity: 1.3 }
+    // quantities - це масив об'єктів { name: "Назва продукту", totalQuantity: 1.3 }
     
-    // РЎРїРѕС‡Р°С‚РєСѓ С‡РёС‚Р°С”РјРѕ РІСЃС– РґР°РЅС–
+    // Спочатку читаємо всі дані
     const allProducts = await readProductsFromSheet();
     
-    // РЎС‚РІРѕСЂСЋС”РјРѕ Map РґР»СЏ С€РІРёРґРєРѕРіРѕ РїРѕС€СѓРєСѓ
+    // Створюємо Map для швидкого пошуку
     const quantityMap = new Map();
     quantities.forEach(q => {
       quantityMap.set(q.name, q.totalQuantity);
     });
     
-    // Р“РѕС‚СѓС”РјРѕ РјР°СЃРёРІ РґР»СЏ batch update
+    // Готуємо масив для batch update
     const updates = [];
     
     allProducts.forEach(product => {
       if (quantityMap.has(product.name)) {
         const quantity = quantityMap.get(product.name);
         updates.push({
-          range: `E${product.rowIndex}`, // Р—Р°РїРёСЃСѓС”РјРѕ РІ РєРѕР»РѕРЅРєСѓ E
+          range: `E${product.rowIndex}`, // Записуємо в колонку E
           values: [[quantity]]
         });
       }
     });
     
     if (updates.length === 0) {
-      console.log("вљ пёЏ РќРµРјР°С” РґР°РЅРёС… РґР»СЏ Р·Р°РїРёСЃСѓ");
+      console.log("⚠️ Немає даних для запису");
       return;
     }
     
-    // Batch update - РѕРЅРѕРІР»СЋС”РјРѕ РІСЃС– РєРѕРјС–СЂРєРё РѕРґРЅРёРј Р·Р°РїРёС‚РѕРј
+    // Batch update - оновлюємо всі комірки одним запитом
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
@@ -375,20 +375,20 @@ export async function writeQuantitiesToSheet(quantities) {
       }
     });
     
-    console.log(`вњ… РћРЅРѕРІР»РµРЅРѕ ${updates.length} Р·Р°РїРёСЃС–РІ Сѓ Google Sheets`);
+    console.log(`✅ Оновлено ${updates.length} записів у Google Sheets`);
   } catch (error) {
-    console.error("вќЊ РџРѕРјРёР»РєР° РїСЂРё Р·Р°РїРёСЃСѓ Р·Р°Р»РёС€РєС–РІ:", error);
+    console.error("❌ Помилка при запису залишків:", error);
     throw error;
   }
 }
 
-// рџ“¦ Р—РђРџРРЎ РџР РћР”РЈРљРўР†Р’ (СЃС‚Р°СЂРёР№ РјРµС‚РѕРґ, Р·Р°Р»РёС€Р°С”РјРѕ РґР»СЏ СЃСѓРјС–СЃРЅРѕСЃС‚С–)
+// 📦 ЗАПИС ПРОДУКТІВ (старий метод, залишаємо для сумісності)
 export async function writeProductsToSheet(products) {
   const hasType = products.length > 0 && products[0].hasOwnProperty('type');
   
   const headers = hasType 
-    ? [["РќР°Р·РІР°", "РљР°С‚РµРіРѕСЂС–СЏ", "РўРёРї"]]
-    : [["РќР°Р·РІР°", "РљР°С‚РµРіРѕСЂС–СЏ"]];
+    ? [["Назва", "Категорія", "Тип"]]
+    : [["Назва", "Категорія"]];
   
   const values = products.map((p) => {
     if (hasType) {

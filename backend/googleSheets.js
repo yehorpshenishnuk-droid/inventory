@@ -17,7 +17,7 @@ const sheets = google.sheets({ version: "v4", auth });
 
 // === Основная логика ===
 const SPREADSHEET_ID = "1eiJw3ADAdq6GfQxsbJp0STDsc1MyJfPXCf2caQy8khw";
-const MASTER_SHEET_NAME = "Master"; // Головний аркуш з шаблоном - ПЕРЕЙМЕНУЙ "Лист1" на "Master" в Google Sheets!
+const MASTER_SHEET_NAME = "Лист1"; // Головний аркуш з шаблоном
 
 // 📥 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS
 export async function readProductsFromSheet() {
@@ -92,37 +92,13 @@ export async function readInventorySheetData(date) {
       return null;
     }
     
-    // Читаємо заголовки (перший рядок)
-    const headerResponse = await sheets.spreadsheets.values.get({
+    // Читаємо дані з аркуша (включаючи колонку E з одиницями)
+    const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A1:Z1`,
+      range: `${sheetName}!A2:E`,
     });
     
-    const headers = headerResponse.data.values?.[0] || [];
-    
-    // Знаходимо які колонки відповідають яким холодильникам
-    const fridgeColumns = {};
-    
-    headers.forEach((header, index) => {
-      const columnLetter = String.fromCharCode(65 + index); // A=65, B=66...
-      
-      // Шукаємо колонки типу "Холодильник 1", "Холодильник 2" і т.д.
-      const match = header?.match(/Холодильник\s+(\d+)/i);
-      if (match) {
-        const fridgeNum = match[1];
-        fridgeColumns[fridgeNum] = columnLetter;
-      }
-    });
-    
-    console.log(`📋 Знайдено холодильників: ${Object.keys(fridgeColumns).length}`);
-    
-    // Читаємо всі дані включаючи колонки холодильників
-    const dataResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:Z`,
-    });
-    
-    const rows = dataResponse.data.values || [];
+    const rows = response.data.values || [];
     const products = [];
     
     rows.forEach((row, index) => {
@@ -130,26 +106,15 @@ export async function readInventorySheetData(date) {
       const name = row[1] || "";
       const category = row[2] || "";
       const type = row[3] || "";
-      const unit = row[5] || "кг"; // Колонка F
+      const unit = row[4] || "кг";
       
-      // Парсимо холодильники з колонки A
+      // Читаємо залишки з колонок холодильників (F, G, H... залежно від кількості)
+      // Поки що не маємо цих даних, тому quantity = ""
+      
       if (fridgeValue.includes(",")) {
         const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
         
         fridgeNumbers.forEach(fridgeNum => {
-          // Знаходимо збережену кількість для цього холодильника
-          let savedQuantity = "";
-          
-          if (fridgeColumns[fridgeNum]) {
-            const columnIndex = fridgeColumns[fridgeNum].charCodeAt(0) - 65; // A=0, B=1...
-            const cellValue = row[columnIndex];
-            
-            // Якщо є значення і воно не порожнє і не 0
-            if (cellValue !== undefined && cellValue !== null && cellValue !== "" && cellValue !== "0") {
-              savedQuantity = cellValue.toString();
-            }
-          }
-          
           products.push({
             rowIndex: index + 2,
             fridge: fridgeNum,
@@ -157,22 +122,10 @@ export async function readInventorySheetData(date) {
             category,
             type,
             unit,
-            quantity: savedQuantity // Збережена кількість з аркуша
+            quantity: "" // Буде заповнено пізніше
           });
         });
-      } else if (fridgeValue) {
-        // Знаходимо збережену кількість для цього холодильника
-        let savedQuantity = "";
-        
-        if (fridgeColumns[fridgeValue]) {
-          const columnIndex = fridgeColumns[fridgeValue].charCodeAt(0) - 65;
-          const cellValue = row[columnIndex];
-          
-          if (cellValue !== undefined && cellValue !== null && cellValue !== "" && cellValue !== "0") {
-            savedQuantity = cellValue.toString();
-          }
-        }
-        
+      } else {
         products.push({
           rowIndex: index + 2,
           fridge: fridgeValue,
@@ -180,7 +133,7 @@ export async function readInventorySheetData(date) {
           category,
           type,
           unit,
-          quantity: savedQuantity
+          quantity: ""
         });
       }
     });
@@ -232,7 +185,7 @@ export async function createInventorySheet(date) {
       return sheetName;
     }
     
-    // Читаємо дані з головного аркуша
+    // Читаємо ВСІ дані з головного аркуша (весь перший рядок з заголовками)
     const masterData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${MASTER_SHEET_NAME}!A1:Z`, // Читаємо всі колонки до Z
@@ -258,64 +211,15 @@ export async function createInventorySheet(date) {
       throw new Error("Немає даних в головному аркуші");
     }
     
-    // 🔥 КРИТИЧНО: Копіюємо тільки структуру БЕЗ старих залишків
-    const cleanRows = rows.map((row, index) => {
-      if (index === 0) {
-        // Перший рядок (заголовки) копіюємо як є
-        return row;
-      } else {
-        // Для всіх інших рядків копіюємо тільки перші 6 колонок (A-F)
-        // A: Холодильник, B: Назва, C: Категорія, D: Тип, E: (порожньо), F: Одиниці
-        // Колонки G, H, I... (холодильники) та останню колонку (Залишки) НЕ копіюємо
-        const cleanRow = row.slice(0, 6); // Беремо тільки A-F
-        // Очищаємо колонку E (старі залишки)
-        if (cleanRow.length > 4) {
-          cleanRow[4] = ""; // Колонка E - порожня
-        }
-        return cleanRow;
-      }
-    });
-    
-    // Копіюємо очищені дані
+    // Копіюємо ВСІ рядки як є (включно з заголовками холодильників)
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1`,
       valueInputOption: "RAW",
-      requestBody: { values: cleanRows }
+      requestBody: { values: rows }
     });
     
-    // Тепер додаємо заголовки холодильників з головного аркуша
-    const headerRow = rows[0];
-    const fridgeHeaders = [];
-    
-    // Знаходимо всі колонки холодильників (починаючи з колонки G)
-    for (let i = 6; i < headerRow.length; i++) {
-      const header = headerRow[i];
-      if (header && (header.includes("Холодильник") || header.toLowerCase().includes("залишки"))) {
-        fridgeHeaders.push({
-          column: String.fromCharCode(65 + i), // A=65, B=66...
-          value: header
-        });
-      }
-    }
-    
-    // Записуємо заголовки холодильників
-    if (fridgeHeaders.length > 0) {
-      const headerUpdates = fridgeHeaders.map(h => ({
-        range: `${sheetName}!${h.column}1`,
-        values: [[h.value]]
-      }));
-      
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          valueInputOption: "RAW",
-          data: headerUpdates
-        }
-      });
-    }
-    
-    console.log(`✅ Створено новий аркуш: ${sheetName} (структура без старих залишків)`);
+    console.log(`✅ Створено новий аркуш: ${sheetName} (скопійовано ${rows.length} рядків)`);
     return sheetName;
   } catch (error) {
     console.error("❌ Помилка при створенні аркуша:", error);
@@ -363,53 +267,17 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     // Читаємо всі дані продуктів (з другого рядка)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:F`,
+      range: `${sheetName}!A2:E`,
     });
     
     const rows = response.data.values || [];
     
-    // 🔥 КРОК 1: СПОЧАТКУ ОЧИЩАЄМО ВСІ КОЛОНКИ ХОЛОДИЛЬНИКІВ
-    console.log("🧹 Очищення старих залишків...");
-    const clearRequests = [];
-    
-    Object.values(fridgeColumns).forEach(column => {
-      // Очищаємо колонку від рядка 2 до кінця даних
-      clearRequests.push({
-        range: `${sheetName}!${column}2:${column}${rows.length + 1}`,
-        values: Array(rows.length).fill([""])
-      });
-    });
-    
-    // Очищаємо колонку "Залишки"
-    if (totalColumn) {
-      clearRequests.push({
-        range: `${sheetName}!${totalColumn}2:${totalColumn}${rows.length + 1}`,
-        values: Array(rows.length).fill([""])
-      });
-    }
-    
-    // Виконуємо очищення
-    if (clearRequests.length > 0) {
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          valueInputOption: "RAW",
-          data: clearRequests
-        }
-      });
-      console.log("✅ Очищено");
-    }
-    
-    // 🔥 КРОК 2: ЗАПИСУЄМО ТІЛЬКИ ЗАПОВНЕНІ ЗНАЧЕННЯ
     // Створюємо Map для швидкого пошуку по кожному холодильнику
     const dataByFridge = {};
     Object.keys(inventoryByFridge).forEach(fridgeNum => {
       dataByFridge[fridgeNum] = new Map();
       inventoryByFridge[fridgeNum].forEach(item => {
-        // Записуємо тільки якщо quantity не порожня
-        if (item.quantity && item.quantity !== "" && item.quantity !== "0") {
-          dataByFridge[fridgeNum].set(item.name, item.quantity);
-        }
+        dataByFridge[fridgeNum].set(item.name, item.quantity);
       });
     });
     
@@ -422,25 +290,21 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
       
       let totalForProduct = 0;
       
-      // Для кожного холодильника записуємо його дані (ТІЛЬКИ якщо є значення)
+      // Для кожного холодильника записуємо його дані
       Object.keys(fridgeColumns).forEach(fridgeNum => {
         const column = fridgeColumns[fridgeNum];
         
         if (dataByFridge[fridgeNum]?.has(productName)) {
           const quantity = dataByFridge[fridgeNum].get(productName);
-          const numQuantity = parseFloat(quantity);
-          
-          if (!isNaN(numQuantity) && numQuantity > 0) {
-            updates.push({
-              range: `${sheetName}!${column}${rowIndex}`,
-              values: [[numQuantity]]
-            });
-            totalForProduct += numQuantity;
-          }
+          updates.push({
+            range: `${sheetName}!${column}${rowIndex}`,
+            values: [[quantity]]
+          });
+          totalForProduct += quantity;
         }
       });
       
-      // Записуємо загальну суму в колонку "Залишки" (ТІЛЬКИ якщо > 0)
+      // Записуємо загальну суму в колонку "Залишки"
       if (totalForProduct > 0 && totalColumn) {
         updates.push({
           range: `${sheetName}!${totalColumn}${rowIndex}`,
@@ -450,7 +314,7 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     });
     
     if (updates.length === 0) {
-      console.log("⚠️ Немає даних для запису (всі значення порожні або нульові)");
+      console.log("⚠️ Немає даних для запису");
       return;
     }
     
@@ -458,17 +322,6 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
-        valueInputOption: "RAW",
-        data: updates
-      }
-    });
-    
-    console.log(`✅ Оновлено ${updates.length} комірок у аркуші "${sheetName}"`);
-  } catch (error) {
-    console.error("❌ Помилка при запису залишків:", error);
-    throw error;
-  }
-}
         valueInputOption: "RAW",
         data: updates
       }

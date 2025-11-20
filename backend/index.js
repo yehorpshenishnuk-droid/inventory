@@ -203,11 +203,8 @@ app.post("/api/inventory/save", async (req, res) => {
       });
     }
     
-    // Отримуємо список всіх холодильників
-    const fridgeNumbers = inventoryData.map(f => f.fridgeNumber);
-    
-    // Створюємо новий аркуш з датою та динамічними колонками
-    const sheetName = await createInventorySheet(inventoryDate, fridgeNumbers);
+    // Створюємо новий аркуш (він автоматично скопіює всі заголовки з Лист1)
+    const sheetName = await createInventorySheet(inventoryDate);
     
     // Готуємо дані по холодильниках (не сумуємо!)
     const inventoryByFridge = {};
@@ -219,7 +216,7 @@ app.post("/api/inventory/save", async (req, res) => {
       }));
     });
     
-    // Записуємо в новий аркуш (окремі колонки для кожного холодильника)
+    // Записуємо в новий аркуш (система сама знайде колонки холодильників)
     await writeQuantitiesToInventorySheet(sheetName, inventoryByFridge);
     
     res.json({ 

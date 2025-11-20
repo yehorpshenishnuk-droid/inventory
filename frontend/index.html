@@ -565,16 +565,7 @@
     async function loadData() {
       try {
         const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
-        
-        if (!response.ok) {
-          throw new Error(`Помилка сервера: ${response.status} ${response.statusText}`);
-        }
-        
         const result = await response.json();
-        
-        if (result.error) {
-          throw new Error(result.error);
-        }
         
         allFridges = result.data || result;
         isExistingInventory = result.existingInventory || false;
@@ -594,19 +585,8 @@
         document.getElementById("loading").style.display = "none";
         showFridgeSelector();
       } catch (error) {
-        console.error("❌ Помилка завантаження:", error);
         document.getElementById("loading").innerHTML = 
-          `<div class="message error">
-            ❌ Помилка завантаження даних<br><br>
-            <strong>Деталі:</strong> ${error.message}<br><br>
-            <strong>Можливі причини:</strong><br>
-            • Сервер не запущений<br>
-            • Помилка в Google Sheets (перевір назву аркуша "Master")<br>
-            • Проблема з інтернет-з'єднанням<br><br>
-            <button onclick="location.reload()" style="padding: 10px 20px; cursor: pointer;">
-              🔄 Спробувати знову
-            </button>
-          </div>`;
+          `<div class="message error">❌ Помилка завантаження: ${error.message}</div>`;
       }
     }
 

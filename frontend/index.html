@@ -528,16 +528,19 @@
       if (code === AUTH_CODE) {
         document.getElementById("auth-modal").classList.remove("active");
         document.getElementById("date-modal").classList.add("active");
+        // Встановлюємо сьогоднішню дату
         document.getElementById("inventory-date").valueAsDate = new Date();
       } else {
         document.getElementById("auth-error").style.display = "block";
       }
     }
 
+    // Enter для авторизації
     document.getElementById("auth-code")?.addEventListener("keypress", (e) => {
       if (e.key === "Enter") checkAuth();
     });
 
+    // Початок інвентаризації
     async function startInventory() {
       const dateInput = document.getElementById("inventory-date").value;
       if (!dateInput) {
@@ -547,20 +550,37 @@
       
       inventoryDate = dateInput;
       document.getElementById("date-modal").classList.remove("active");
+      
+      // Завантажуємо чернетку з localStorage
       loadDraft();
+      
+      // Завантажуємо дані
       await loadData();
+      
+      // Запускаємо автозбереження
       startAutosave();
     }
 
+    // Завантаження даних
     async function loadData() {
       try {
         const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
+        
+        if (!response.ok) {
+          throw new Error(`Помилка сервера: ${response.status} ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        
+        if (result.error) {
+          throw new Error(result.error);
+        }
         
         allFridges = result.data || result;
         isExistingInventory = result.existingInventory || false;
         
         if (isExistingInventory) {
+          // Якщо існує інвентаризація за цю дату, завантажуємо збережені дані
           allFridges.forEach(fridge => {
             inventoryData[fridge.fridgeNumber] = fridge.products.map(p => ({
               name: p.name,
@@ -574,11 +594,23 @@
         document.getElementById("loading").style.display = "none";
         showFridgeSelector();
       } catch (error) {
+        console.error("❌ Помилка завантаження:", error);
         document.getElementById("loading").innerHTML = 
-          `<div class="message error">❌ Помилка завантаження: ${error.message}</div>`;
+          `<div class="message error">
+            ❌ Помилка завантаження даних<br><br>
+            <strong>Деталі:</strong> ${error.message}<br><br>
+            <strong>Можливі причини:</strong><br>
+            • Сервер не запущений<br>
+            • Помилка в Google Sheets (перевір назву аркуша "Master")<br>
+            • Проблема з інтернет-з'єднанням<br><br>
+            <button onclick="location.reload()" style="padding: 10px 20px; cursor: pointer;">
+              🔄 Спробувати знову
+            </button>
+          </div>`;
       }
     }
 
+    // Показати повідомлення
     function showMessage(text, type = "success") {
       const messageDiv = document.getElementById("message");
       messageDiv.className = `message ${type}`;
@@ -589,6 +621,7 @@
       }, 5000);
     }
 
+    // Показати екран вибору холодильників
     function showFridgeSelector() {
       document.getElementById("fridge-selector").style.display = "grid";
       document.getElementById("product-list").classList.remove("active");
@@ -628,6 +661,7 @@
       }
     }
 
+    // Показати продукти холодильника
     function showProducts(fridge) {
       currentFridge = fridge;
       currentProducts = fridge.products;
@@ -682,16 +716,26 @@
       updateSearchStats();
     }
 
+    // Обробка введення
     function handleInput(input) {
       hasUnsavedChanges = true;
+      
+      // Нормалізація: заміна коми на крапку
       let value = input.value.replace(/,/g, '.');
+      
+      // Видалення пробілів та тексту (кг, г, т.д.)
       value = value.replace(/[^\d+\-*/().]/g, '');
+      
       input.value = value;
+      
+      // Видалення класу помилки
       input.classList.remove("error");
+      
       updateProgress();
       markAsFilled(input);
     }
 
+    // Обчислення виразів (1+2, 5+3.5)
     function calculateExpression(input) {
       const value = input.value.trim();
       
@@ -700,6 +744,7 @@
         return;
       }
       
+      // Якщо є математичні оператори, обчислюємо
       if (/[+\-*/]/.test(value)) {
         try {
           const result = eval(value);
@@ -713,6 +758,7 @@
           input.classList.add("error");
         }
       } else {
+        // Перевірка чи це число
         const num = parseFloat(value);
         if (isNaN(num)) {
           input.classList.add("error");
@@ -725,6 +771,7 @@
       updateProgress();
     }
 
+    // Позначити поле як заповнене
     function markAsFilled(input) {
       if (input.value !== "") {
         input.classList.add("filled");
@@ -733,6 +780,7 @@
       }
     }
 
+    // Фільтрація продуктів
     function filterProducts() {
       const searchTerm = document.getElementById("search-input").value.toLowerCase();
       const items = document.querySelectorAll(".product-item");
@@ -759,6 +807,7 @@
       updateSearchStats(visibleCount, items.length);
     }
 
+    // Оновлення статистики пошуку
     function updateSearchStats(visible, total) {
       const statsDiv = document.getElementById("search-stats-text");
       const searchTerm = document.getElementById("search-input").value;
@@ -775,6 +824,7 @@
       }
     }
 
+    // Оновлення прогресу
     function updateProgress() {
       const inputs = document.querySelectorAll("#products-container input");
       const filled = Array.from(inputs).filter(input => input.value !== "").length;
@@ -784,6 +834,7 @@
       document.getElementById("progress-fill").style.width = percent + "%";
     }
 
+    // Зберегти дані поточного холодильника
     function saveCurrentFridge() {
       const inputs = document.querySelectorAll("#products-container input");
       const products = [];
@@ -807,7 +858,9 @@
       }, 1500);
     }
 
+    // Синхронізація з Google Sheets (без закриття інвентаризації)
     async function syncToGoogleSheets() {
+      // Спочатку зберігаємо поточний холодильник локально
       const inputs = document.querySelectorAll("#products-container input");
       const products = [];
       
@@ -822,15 +875,16 @@
       inventoryData[currentFridge.fridgeNumber] = products;
       saveDraft();
       
+      // Готуємо дані для відправки - тільки заповнені позиції
       const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
         fridgeNumber,
         products: inventoryData[fridgeNumber]
-          .filter(p => p.quantity !== "")
+          .filter(p => p.quantity !== "") // Відфільтровуємо порожні
           .map(p => ({
             name: p.name,
             quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
           }))
-      })).filter(f => f.products.length > 0);
+      })).filter(f => f.products.length > 0); // Тільки холодильники з даними
       
       try {
         showMessage("🔄 Синхронізація з Google Sheets...", "info");
@@ -859,6 +913,7 @@
       }
     }
 
+    // Перевірка незаповнених позицій
     function checkAndSaveAll() {
       const unfilled = [];
       
@@ -880,6 +935,7 @@
       }
     }
 
+    // Показати модальне вікно незаповнених
     function showUnfilledModal(unfilled) {
       const modal = document.getElementById("unfilled-modal");
       const list = document.getElementById("unfilled-list");
@@ -896,26 +952,30 @@
       modal.classList.add("active");
     }
 
+    // Закрити модальне вікно
     function closeUnfilledModal() {
       document.getElementById("unfilled-modal").classList.remove("active");
     }
 
+    // Підтвердити збереження
     function confirmSave() {
       closeUnfilledModal();
       saveAllInventory();
     }
 
+    // Зберегти всю інвентаризацію
     async function saveAllInventory() {
       try {
+        // Готуємо дані - тільки заповнені позиції
         const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
           fridgeNumber,
           products: inventoryData[fridgeNumber]
-            .filter(p => p.quantity !== "")
+            .filter(p => p.quantity !== "") // Відфільтровуємо порожні
             .map(p => ({
               name: p.name,
               quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
             }))
-        })).filter(f => f.products.length > 0);
+        })).filter(f => f.products.length > 0); // Тільки холодильники з даними
         
         const response = await fetch(`${API_URL}/api/inventory/save`, {
           method: "POST",
@@ -947,11 +1007,13 @@
       }
     }
 
+    // ============ АВТОЗБЕРЕЖЕННЯ ============
+    
     function startAutosave() {
       autosaveInterval = setInterval(() => {
         saveDraft();
         showAutosaveIndicator();
-      }, 5000);
+      }, 5000); // Кожні 5 секунд
     }
 
     function stopAutosave() {
@@ -992,6 +1054,7 @@
       }, 3000);
     }
 
+    // Попередження перед виходом
     window.addEventListener("beforeunload", (e) => {
       if (hasUnsavedChanges || Object.keys(inventoryData).length > 0) {
         e.preventDefault();

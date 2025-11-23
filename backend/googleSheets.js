@@ -283,10 +283,42 @@ export async function createInventorySheet(date) {
       requestBody: { values: filteredRows }
     });
     
+    // Форматуємо колонки A і B як текст, щоб уникнути апострофів
+    const sheetId = (await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    })).data.sheets.find(s => s.properties.title === sheetName)?.properties?.sheetId;
+    
+    if (sheetId !== undefined) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            repeatCell: {
+              range: {
+                sheetId: sheetId,
+                startColumnIndex: 0, // Колонка A
+                endColumnIndex: 2,   // До колонки B (не включно C)
+                startRowIndex: 1     // Починаючи з рядка 2 (пропускаємо заголовок)
+              },
+              cell: {
+                userEnteredFormat: {
+                  numberFormat: {
+                    type: "TEXT"
+                  }
+                }
+              },
+              fields: "userEnteredFormat.numberFormat"
+            }
+          }]
+        }
+      });
+    }
+    
     const skippedCount = rows.length - filteredRows.length;
     console.log(`✅ Створено новий аркуш: ${sheetName}`);
     console.log(`   📋 Скопійовано: ${filteredRows.length - 1} продуктів (з прив'язкою)`);
     console.log(`   ⏭️ Пропущено: ${skippedCount} продуктів (без прив'язки)`);
+    console.log(`   📝 Колонки A-B відформатовані як текст`);
     return sheetName;
   } catch (error) {
     console.error("❌ Помилка при створенні аркуша:", error);

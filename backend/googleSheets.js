@@ -303,7 +303,7 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     const updates = [];
     
     rows.forEach((row, index) => {
-      const productName = row[1]; // Колонка B - Назва
+      const productName = row[2]; // Колонка C - Назва (row[0]=A, row[1]=B, row[2]=C)
       const rowIndex = index + 2;
       
       let totalForProduct = 0;

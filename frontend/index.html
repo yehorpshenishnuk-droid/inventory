@@ -432,7 +432,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>❄️ Інвентаризація холодильників</h1>
+    <h1>❄️📦 Інвентаризація холодильників та стелажів</h1>
     
     <!-- Авторизація -->
     <div id="auth-modal" class="modal active">
@@ -521,6 +521,17 @@
     let hasUnsavedChanges = false;
     let autosaveInterval = null;
     let isExistingInventory = false;
+    
+    // Визначення типу холодильника/стелажа
+    const SHELVES = ['3', '4', '8', '16']; // Номери стелажів
+    
+    function getFridgeType(number) {
+      return SHELVES.includes(String(number)) ? 'Стелаж' : 'Холодильник';
+    }
+    
+    function getFridgeIcon(number) {
+      return SHELVES.includes(String(number)) ? '📦' : '❄️';
+    }
 
     // Перевірка авторизації
     function checkAuth() {
@@ -621,8 +632,8 @@
         }
         
         card.innerHTML = `
-          <div class="fridge-icon">❄️</div>
-          <div class="fridge-number">Холодильник ${fridge.fridgeNumber}</div>
+          <div class="fridge-icon">${getFridgeIcon(fridge.fridgeNumber)}</div>
+          <div class="fridge-number">${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}</div>
           <div class="fridge-count">${fridge.products.length} позицій</div>
           ${hasData ? '<div style="margin-top: 10px;">✅ Заповнено</div>' : ''}
         `;
@@ -648,7 +659,7 @@
       document.getElementById("fridge-selector").style.display = "none";
       document.getElementById("product-list").classList.add("active");
       document.getElementById("current-fridge-title").textContent = 
-        `Холодильник ${fridge.fridgeNumber}`;
+        `${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}`;
       
       document.getElementById("search-input").value = "";
       
@@ -925,7 +936,7 @@
       unfilled.forEach(item => {
         const div = document.createElement("div");
         div.className = "unfilled-item";
-        div.textContent = `Холодильник ${item.fridge}: ${item.name}`;
+        div.textContent = `${getFridgeType(item.fridge)} ${item.fridge}: ${item.name}`;
         list.appendChild(div);
       });
       

@@ -31,36 +31,46 @@ export async function readProductsFromSheet() {
     const products = [];
     
     rows.forEach((row, index) => {
-      const fridgeValue = row[0] || "";
-      const name = row[1] || "";
-      const category = row[2] || "";
-      const type = row[3] || "";
-      // row[4] - це старі залишки, пропускаємо
-      const unit = row[5] || "кг"; // Колонка F - Одиниці виміру
+      const fridgeValue = row[0] || ""; // Колонка A - Холодильники
+      const shelfValue = row[1] || "";  // Колонка B - Стелажі
+      const name = row[2] || "";        // Колонка C - Назва
+      const category = row[3] || "";    // Колонка D - Категорія
+      const type = row[4] || "";        // Колонка E - Тип
+      const unit = row[5] || "кг";      // Колонка F - Одиниці виміру
       
-      if (fridgeValue.includes(",")) {
-        const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
-        
-        fridgeNumbers.forEach(fridgeNum => {
+      // Об'єднуємо холодильники та стелажі
+      const allLocations = [];
+      
+      // Додаємо холодильники з колонки A
+      if (fridgeValue) {
+        if (fridgeValue.includes(",")) {
+          allLocations.push(...fridgeValue.split(",").map(f => f.trim()));
+        } else {
+          allLocations.push(fridgeValue);
+        }
+      }
+      
+      // Додаємо стелажі з колонки B
+      if (shelfValue) {
+        if (shelfValue.includes(",")) {
+          allLocations.push(...shelfValue.split(",").map(f => f.trim()));
+        } else {
+          allLocations.push(shelfValue);
+        }
+      }
+      
+      // Створюємо запис для кожного місця (холодильника або стелажа)
+      if (allLocations.length > 0) {
+        allLocations.forEach(location => {
           products.push({
             rowIndex: index + 2,
-            fridge: fridgeNum,
+            fridge: location,
             name,
             category,
             type,
             unit,
             quantity: "" // Не читаємо старі залишки
           });
-        });
-      } else {
-        products.push({
-          rowIndex: index + 2,
-          fridge: fridgeValue,
-          name,
-          category,
-          type,
-          unit,
-          quantity: ""
         });
       }
     });
@@ -92,48 +102,56 @@ export async function readInventorySheetData(date) {
       return null;
     }
     
-    // Читаємо дані з аркуша (включаючи колонку E з одиницями)
+    // Читаємо дані з аркуша (включаючи колонку F з одиницями)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:E`,
+      range: `${sheetName}!A2:F`,
     });
     
     const rows = response.data.values || [];
     const products = [];
     
     rows.forEach((row, index) => {
-      const fridgeValue = row[0] || "";
-      const name = row[1] || "";
-      const category = row[2] || "";
-      const type = row[3] || "";
-      const unit = row[4] || "кг";
+      const fridgeValue = row[0] || ""; // Колонка A - Холодильники
+      const shelfValue = row[1] || "";  // Колонка B - Стелажі
+      const name = row[2] || "";        // Колонка C - Назва
+      const category = row[3] || "";    // Колонка D - Категорія
+      const type = row[4] || "";        // Колонка E - Тип
+      const unit = row[5] || "кг";      // Колонка F - Одиниці виміру
       
-      // Читаємо залишки з колонок холодильників (F, G, H... залежно від кількості)
-      // Поки що не маємо цих даних, тому quantity = ""
+      // Об'єднуємо холодильники та стелажі
+      const allLocations = [];
       
-      if (fridgeValue.includes(",")) {
-        const fridgeNumbers = fridgeValue.split(",").map(f => f.trim());
-        
-        fridgeNumbers.forEach(fridgeNum => {
+      // Додаємо холодильники з колонки A
+      if (fridgeValue) {
+        if (fridgeValue.includes(",")) {
+          allLocations.push(...fridgeValue.split(",").map(f => f.trim()));
+        } else {
+          allLocations.push(fridgeValue);
+        }
+      }
+      
+      // Додаємо стелажі з колонки B
+      if (shelfValue) {
+        if (shelfValue.includes(",")) {
+          allLocations.push(...shelfValue.split(",").map(f => f.trim()));
+        } else {
+          allLocations.push(shelfValue);
+        }
+      }
+      
+      // Створюємо запис для кожного місця
+      if (allLocations.length > 0) {
+        allLocations.forEach(location => {
           products.push({
             rowIndex: index + 2,
-            fridge: fridgeNum,
+            fridge: location,
             name,
             category,
             type,
             unit,
             quantity: "" // Буде заповнено пізніше
           });
-        });
-      } else {
-        products.push({
-          rowIndex: index + 2,
-          fridge: fridgeValue,
-          name,
-          category,
-          type,
-          unit,
-          quantity: ""
         });
       }
     });

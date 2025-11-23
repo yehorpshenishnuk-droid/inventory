@@ -19,6 +19,9 @@ const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = "1eiJw3ADAdq6GfQxsbJp0STDsc1MyJfPXCf2caQy8khw";
 const MASTER_SHEET_NAME = "Лист1"; // Головний аркуш з шаблоном
 
+// Експортуємо для використання в інших модулях
+export { sheets, SPREADSHEET_ID };
+
 // 📥 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS
 export async function readProductsFromSheet() {
   try {

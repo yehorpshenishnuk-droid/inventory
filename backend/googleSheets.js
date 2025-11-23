@@ -102,10 +102,35 @@ export async function readInventorySheetData(date) {
       return null;
     }
     
-    // Читаємо дані з аркуша (включаючи колонку F з одиницями)
+    // Читаємо заголовки (перший рядок) щоб знайти колонки холодильників
+    const headerResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1:Z1`,
+    });
+    
+    const headers = headerResponse.data.values?.[0] || [];
+    
+    // Знаходимо які колонки відповідають яким холодильникам/стелажам
+    const locationColumns = {};
+    
+    headers.forEach((header, index) => {
+      const columnLetter = String.fromCharCode(65 + index); // A=65, B=66...
+      
+      // Шукаємо колонки типу "Холодильник 1", "Стелаж 3" і т.д.
+      const fridgeMatch = header?.match(/Холодильник\s+(\d+)/i);
+      const shelfMatch = header?.match(/Стелаж\s+(\d+)/i);
+      
+      if (fridgeMatch) {
+        locationColumns[fridgeMatch[1]] = { column: columnLetter, index };
+      } else if (shelfMatch) {
+        locationColumns[shelfMatch[1]] = { column: columnLetter, index };
+      }
+    });
+    
+    // Читаємо дані з аркуша (всі колонки до Z)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:F`,
+      range: `${sheetName}!A2:Z`,
     });
     
     const rows = response.data.values || [];
@@ -122,27 +147,29 @@ export async function readInventorySheetData(date) {
       // Об'єднуємо холодильники та стелажі
       const allLocations = [];
       
-      // Додаємо холодильники з колонки A
       if (fridgeValue) {
         if (fridgeValue.includes(",")) {
           allLocations.push(...fridgeValue.split(",").map(f => f.trim()));
         } else {
-          allLocations.push(fridgeValue);
+          allLocations.push(fridgeValue.trim());
         }
       }
       
-      // Додаємо стелажі з колонки B
       if (shelfValue) {
         if (shelfValue.includes(",")) {
           allLocations.push(...shelfValue.split(",").map(f => f.trim()));
         } else {
-          allLocations.push(shelfValue);
+          allLocations.push(shelfValue.trim());
         }
       }
       
-      // Створюємо запис для кожного місця
+      // Створюємо запис для кожного місця з реальними залишками
       if (allLocations.length > 0) {
         allLocations.forEach(location => {
+          // Знаходимо залишок для цього місця
+          const locationInfo = locationColumns[location];
+          const quantity = locationInfo && row[locationInfo.index] ? row[locationInfo.index] : "";
+          
           products.push({
             rowIndex: index + 2,
             fridge: location,
@@ -150,13 +177,13 @@ export async function readInventorySheetData(date) {
             category,
             type,
             unit,
-            quantity: "" // Буде заповнено пізніше
+            quantity: quantity // Реальний залишок з колонки холодильника!
           });
         });
       }
     });
     
-    console.log(`📋 Прочитано ${products.length} продуктів з аркуша "${sheetName}"`);
+    console.log(`📋 Прочитано ${products.length} продуктів з аркуша "${sheetName}" (з залишками)`);
     return products;
   } catch (error) {
     console.error("❌ Помилка при читанні аркуша інвентаризації:", error);

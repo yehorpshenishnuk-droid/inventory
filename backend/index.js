@@ -7,7 +7,9 @@ import {
   createInventorySheet,
   writeQuantitiesToInventorySheet,
   readInventorySheetData,
-  checkInventorySheetExists
+  checkInventorySheetExists,
+  sheets,
+  SPREADSHEET_ID
 } from "./googleSheets.js";
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
 
@@ -226,6 +228,54 @@ app.post("/api/inventory/save", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Помилка при збереженні залишків:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 📥 ЕКСПОРТ АРКУША В PDF
+app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
+  try {
+    const sheetName = decodeURIComponent(req.params.sheetName);
+    
+    console.log(`📄 Запит на експорт PDF для аркуша: ${sheetName}`);
+    
+    // Отримуємо ID аркуша
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const sheet = spreadsheet.data.sheets.find(
+      s => s.properties.title === sheetName
+    );
+    
+    if (!sheet) {
+      return res.status(404).json({ 
+        success: false, 
+        error: `Аркуш "${sheetName}" не знайдено` 
+      });
+    }
+    
+    const sheetId = sheet.properties.sheetId;
+    
+    // Формуємо URL для експорту PDF
+    // Використовуємо той самий credentials що і для API
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=pdf&gid=${sheetId}&portrait=false&fitw=true`;
+    
+    console.log(`✅ Генерую посилання на PDF: ${exportUrl}`);
+    
+    // Повертаємо інформацію для фронтенду
+    res.json({ 
+      success: true, 
+      downloadUrl: exportUrl,
+      sheetName: sheetName,
+      message: "PDF готовий до завантаження"
+    });
+    
+  } catch (error) {
+    console.error("❌ Помилка при експорті PDF:", error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

@@ -982,19 +982,85 @@
         const result = await response.json();
         
         if (result.success) {
-          alert(`✅ ${result.message}\n\nАркуш: ${result.sheetName}`);
+          // Показуємо модальне вікно з кнопкою завантаження PDF
+          const modalHtml = `
+            <div style="text-align: center;">
+              <h2 style="color: #10b981; margin-bottom: 20px;">✅ Інвентаризацію успішно збережено!</h2>
+              <p style="font-size: 1.1em; margin-bottom: 30px;">Аркуш: <strong>${result.sheetName}</strong></p>
+              <button 
+                onclick="downloadInventoryPDF('${result.sheetName}')" 
+                style="background: #3b82f6; color: white; border: none; padding: 15px 30px; 
+                       border-radius: 10px; font-size: 1.1em; cursor: pointer; margin-bottom: 15px;
+                       display: inline-flex; align-items: center; gap: 10px;"
+                onmouseover="this.style.background='#2563eb'" 
+                onmouseout="this.style.background='#3b82f6'">
+                📥 Завантажити PDF
+              </button>
+              <br>
+              <button 
+                onclick="location.reload()" 
+                style="background: #6b7280; color: white; border: none; padding: 12px 25px; 
+                       border-radius: 10px; font-size: 1em; cursor: pointer;"
+                onmouseover="this.style.background='#4b5563'" 
+                onmouseout="this.style.background='#6b7280'">
+                Закрити
+              </button>
+            </div>
+          `;
+          
+          // Створюємо тимчасове модальне вікно
+          const existingModal = document.getElementById("success-modal");
+          if (existingModal) {
+            existingModal.remove();
+          }
+          
+          const modal = document.createElement("div");
+          modal.id = "success-modal";
+          modal.className = "modal active";
+          modal.innerHTML = `<div class="modal-content">${modalHtml}</div>`;
+          document.body.appendChild(modal);
+          
           inventoryData = {};
           inventoryDate = null;
           hasUnsavedChanges = false;
           clearDraft();
           stopAutosave();
-          document.getElementById("date-modal").classList.add("active");
-          document.getElementById("fridge-selector").style.display = "none";
         } else {
           alert("❌ Помилка: " + result.error);
         }
       } catch (error) {
         alert("❌ Помилка збереження: " + error.message);
+      }
+    }
+    
+    // Завантажити PDF інвентаризації
+    async function downloadInventoryPDF(sheetName) {
+      try {
+        const button = event.target;
+        button.disabled = true;
+        button.textContent = "⏳ Генерую PDF...";
+        
+        const response = await fetch(`${API_URL}/api/inventory/export-pdf/${encodeURIComponent(sheetName)}`);
+        const result = await response.json();
+        
+        if (result.success) {
+          // Відкриваємо PDF в новій вкладці
+          window.open(result.downloadUrl, '_blank');
+          button.textContent = "✅ PDF завантажено!";
+          
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = "📥 Завантажити PDF";
+          }, 2000);
+        } else {
+          alert("❌ Помилка експорту: " + result.error);
+          button.disabled = false;
+          button.textContent = "📥 Завантажити PDF";
+        }
+      } catch (error) {
+        alert("❌ Помилка: " + error.message);
+        event.target.disabled = false;
+        event.target.textContent = "📥 Завантажити PDF";
       }
     }
 

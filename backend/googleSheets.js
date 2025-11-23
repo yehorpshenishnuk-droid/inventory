@@ -256,15 +256,37 @@ export async function createInventorySheet(date) {
       throw new Error("Немає даних в головному аркуші");
     }
     
-    // Копіюємо ВСІ рядки як є (включно з заголовками холодильників)
+    // Відфільтровуємо рядки - залишаємо тільки заголовок + продукти з прив'язкою
+    const filteredRows = [];
+    
+    rows.forEach((row, index) => {
+      // Перший рядок (заголовки) - завжди копіюємо
+      if (index === 0) {
+        filteredRows.push(row);
+        return;
+      }
+      
+      // Для інших рядків - перевіряємо чи є прив'язка до холодильника/стелажа
+      const hasLocation = (row[0] && row[0].toString().trim()) || // Колонка A - Холодильник
+                          (row[1] && row[1].toString().trim());    // Колонка B - Стелаж
+      
+      if (hasLocation) {
+        filteredRows.push(row);
+      }
+    });
+    
+    // Копіюємо тільки відфільтровані рядки
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1`,
       valueInputOption: "RAW",
-      requestBody: { values: rows }
+      requestBody: { values: filteredRows }
     });
     
-    console.log(`✅ Створено новий аркуш: ${sheetName} (скопійовано ${rows.length} рядків)`);
+    const skippedCount = rows.length - filteredRows.length;
+    console.log(`✅ Створено новий аркуш: ${sheetName}`);
+    console.log(`   📋 Скопійовано: ${filteredRows.length - 1} продуктів (з прив'язкою)`);
+    console.log(`   ⏭️ Пропущено: ${skippedCount} продуктів (без прив'язки)`);
     return sheetName;
   } catch (error) {
     console.error("❌ Помилка при створенні аркуша:", error);

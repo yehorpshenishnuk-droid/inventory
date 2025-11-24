@@ -655,6 +655,128 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
   }
 }
 
+// 📤 ДОДАВАННЯ ЗАЛИШКІВ ДО ІСНУЮЧИХ (а не перезапис)
+export async function addQuantitiesToInventorySheet(sheetName, inventoryByFridge) {
+  try {
+    // Читаємо заголовки
+    const headerResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1:Z1`,
+    });
+    
+    const headers = headerResponse.data.values?.[0] || [];
+    
+    // Знаходимо колонки холодильників/стелажів
+    const fridgeColumns = {};
+    let totalColumn = null;
+    
+    headers.forEach((header, index) => {
+      const columnLetter = String.fromCharCode(65 + index);
+      
+      const fridgeMatch = header?.match(/Холодильник\s+(\d+)/i);
+      const shelfMatch = header?.match(/Стелаж\s+(\d+)/i);
+      
+      if (fridgeMatch) {
+        fridgeColumns[fridgeMatch[1]] = { column: columnLetter, index };
+      } else if (shelfMatch) {
+        fridgeColumns[shelfMatch[1]] = { column: columnLetter, index };
+      }
+      
+      if (header?.toLowerCase().includes('залишки')) {
+        totalColumn = { column: columnLetter, index };
+      }
+    });
+    
+    if (Object.keys(fridgeColumns).length === 0) {
+      throw new Error("Не знайдено колонок холодильників");
+    }
+    
+    // Читаємо ВСІ дані включно з колонками холодильників
+    const dataResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A2:Z`,
+    });
+    
+    const rows = dataResponse.data.values || [];
+    
+    // Створюємо Map для нових даних
+    const dataByFridge = {};
+    Object.keys(inventoryByFridge).forEach(fridgeNum => {
+      dataByFridge[fridgeNum] = new Map();
+      inventoryByFridge[fridgeNum].forEach(item => {
+        dataByFridge[fridgeNum].set(item.name, item.quantity);
+      });
+    });
+    
+    const updates = [];
+    
+    rows.forEach((row, index) => {
+      const productName = row[2]; // Колонка C - Назва
+      const rowIndex = index + 2;
+      
+      let totalForProduct = 0;
+      
+      // Для кожного холодильника
+      Object.keys(fridgeColumns).forEach(fridgeNum => {
+        const fridgeInfo = fridgeColumns[fridgeNum];
+        const column = fridgeInfo.column;
+        const colIndex = fridgeInfo.index;
+        
+        if (dataByFridge[fridgeNum]?.has(productName)) {
+          const newQuantity = dataByFridge[fridgeNum].get(productName);
+          
+          // ✅ ЧИТАЄМО ІСНУЮЧЕ ЗНАЧЕННЯ
+          const existingValue = row[colIndex] || "";
+          const existingQuantity = parseFloat(existingValue) || 0;
+          
+          // ✅ ДОДАЄМО до існуючого
+          const finalQuantity = existingQuantity + newQuantity;
+          
+          updates.push({
+            range: `${sheetName}!${column}${rowIndex}`,
+            values: [[finalQuantity]]
+          });
+          
+          totalForProduct += finalQuantity;
+          
+          console.log(`➕ ${productName} (Холод ${fridgeNum}): ${existingQuantity} + ${newQuantity} = ${finalQuantity}`);
+        } else if (row[colIndex]) {
+          // Якщо немає нових даних, але є старі - рахуємо для загальної суми
+          const existingQuantity = parseFloat(row[colIndex]) || 0;
+          totalForProduct += existingQuantity;
+        }
+      });
+      
+      // Оновлюємо загальну суму
+      if (totalColumn && totalForProduct > 0) {
+        updates.push({
+          range: `${sheetName}!${totalColumn.column}${rowIndex}`,
+          values: [[totalForProduct]]
+        });
+      }
+    });
+    
+    if (updates.length === 0) {
+      console.log("⚠️ Немає даних для додавання");
+      return;
+    }
+    
+    // Batch update
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        valueInputOption: "RAW",
+        data: updates
+      }
+    });
+    
+    console.log(`✅ Додано/оновлено ${updates.length} комірок у аркуші "${sheetName}"`);
+  } catch (error) {
+    console.error("❌ Помилка при додаванні залишків:", error);
+    throw error;
+  }
+}
+
 // 📤 ЗАПИС ЗАЛИШКІВ В КОЛОНКУ E
 export async function writeQuantitiesToSheet(quantities) {
   try {

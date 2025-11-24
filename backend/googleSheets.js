@@ -559,19 +559,25 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     
     const headers = headerResponse.data.values?.[0] || [];
     
-    // Знаходимо які колонки відповідають яким холодильникам
+    // Знаходимо які колонки відповідають яким холодильникам/стелажам
     const fridgeColumns = {};
     let totalColumn = null;
     
     headers.forEach((header, index) => {
       const columnLetter = String.fromCharCode(65 + index); // A=65, B=66...
       
-      // Шукаємо колонки типу "Холодильник 1", "Холодильник 2" і т.д.
-      const match = header?.match(/Холодильник\s+(\d+)/i);
-      if (match) {
-        const fridgeNum = match[1];
-        fridgeColumns[fridgeNum] = columnLetter;
-        console.log(`📋 Знайдено: Холодильник ${fridgeNum} → колонка ${columnLetter}`);
+      // Шукаємо колонки типу "Холодильник 1", "Стелаж 3" і т.д.
+      const fridgeMatch = header?.match(/Холодильник\s+(\d+)/i);
+      const shelfMatch = header?.match(/Стелаж\s+(\d+)/i);
+      
+      if (fridgeMatch) {
+        const locationNum = fridgeMatch[1];
+        fridgeColumns[locationNum] = columnLetter;
+        console.log(`📋 Знайдено: Холодильник ${locationNum} → колонка ${columnLetter}`);
+      } else if (shelfMatch) {
+        const locationNum = shelfMatch[1];
+        fridgeColumns[locationNum] = columnLetter;
+        console.log(`📋 Знайдено: Стелаж ${locationNum} → колонка ${columnLetter}`);
       }
       
       // Шукаємо колонку "Залишки"
@@ -582,8 +588,12 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     });
     
     if (Object.keys(fridgeColumns).length === 0) {
-      throw new Error("Не знайдено жодної колонки з холодильниками");
+      console.error("❌ Не знайдено жодної колонки з холодильниками чи стелажами");
+      console.log("📋 Доступні заголовки:", headers);
+      throw new Error("Не знайдено жодної колонки з холодильниками чи стелажами");
     }
+    
+    console.log(`✅ Знайдено ${Object.keys(fridgeColumns).length} колонок холодильників/стелажів`);
     
     // Читаємо всі дані продуктів (з другого рядка)
     const response = await sheets.spreadsheets.values.get({
@@ -593,7 +603,7 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     
     const rows = response.data.values || [];
     
-    // Створюємо Map для швидкого пошуку по кожному холодильнику
+    // Створюємо Map для швидкого пошуку по кожному холодильнику/стелажу
     const dataByFridge = {};
     Object.keys(inventoryByFridge).forEach(fridgeNum => {
       dataByFridge[fridgeNum] = new Map();
@@ -611,7 +621,7 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
       
       let totalForProduct = 0;
       
-      // Для кожного холодильника записуємо його дані
+      // Для кожного холодильника/стелажа записуємо його дані
       Object.keys(fridgeColumns).forEach(fridgeNum => {
         const column = fridgeColumns[fridgeNum];
         
@@ -688,8 +698,12 @@ export async function addQuantitiesToInventorySheet(sheetName, inventoryByFridge
     });
     
     if (Object.keys(fridgeColumns).length === 0) {
-      throw new Error("Не знайдено колонок холодильників");
+      console.error("❌ Не знайдено колонок холодильників/стелажів");
+      console.log("📋 Доступні заголовки:", headers);
+      throw new Error("Не знайдено колонок холодильників/стелажів");
     }
+    
+    console.log(`✅ Знайдено ${Object.keys(fridgeColumns).length} колонок для додавання`);
     
     // Читаємо ВСІ дані включно з колонками холодильників
     const dataResponse = await sheets.spreadsheets.values.get({
@@ -716,7 +730,7 @@ export async function addQuantitiesToInventorySheet(sheetName, inventoryByFridge
       
       let totalForProduct = 0;
       
-      // Для кожного холодильника
+      // Для кожного холодильника/стелажа
       Object.keys(fridgeColumns).forEach(fridgeNum => {
         const fridgeInfo = fridgeColumns[fridgeNum];
         const column = fridgeInfo.column;
@@ -739,7 +753,7 @@ export async function addQuantitiesToInventorySheet(sheetName, inventoryByFridge
           
           totalForProduct += finalQuantity;
           
-          console.log(`➕ ${productName} (Холод ${fridgeNum}): ${existingQuantity} + ${newQuantity} = ${finalQuantity}`);
+          console.log(`➕ ${productName} (Локація ${fridgeNum}): ${existingQuantity} + ${newQuantity} = ${finalQuantity}`);
         } else if (row[colIndex]) {
           // Якщо немає нових даних, але є старі - рахуємо для загальної суми
           const existingQuantity = parseFloat(row[colIndex]) || 0;

@@ -523,6 +523,8 @@
     let autosaveInterval = null;
     let isExistingInventory = false;
     let currentUserName = ""; // Ім'я поточного користувача
+    let inventoryOwner = null; // Головний інвентаризації
+    let isOwner = false; // Чи є поточний користувач головним
     
     // Визначення типу холодильника/стелажа
     const SHELVES = ['3', '4', '8', '16']; // Номери стелажів
@@ -631,6 +633,51 @@
       }
     }
     
+    // === ФУНКЦІЇ ГОЛОВНОГО ІНВЕНТАРИЗАЦІЇ ===
+    
+    // Встановити себе як головного
+    async function setAsOwner(date) {
+      try {
+        const response = await fetch(`${API_URL}/api/inventory/set-owner`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: date,
+            userName: currentUserName
+          })
+        });
+        return await response.json();
+      } catch (error) {
+        console.error("Помилка встановлення головного:", error);
+        return { success: false, error: error.message };
+      }
+    }
+    
+    // Отримати головного для дати
+    async function getOwner(date) {
+      try {
+        const response = await fetch(`${API_URL}/api/inventory/get-owner/${date}`);
+        const result = await response.json();
+        return result.hasOwner ? result : null;
+      } catch (error) {
+        console.error("Помилка отримання головного:", error);
+        return null;
+      }
+    }
+    
+    // Видалити головного (після завершення)
+    async function clearOwner(date) {
+      try {
+        const response = await fetch(`${API_URL}/api/inventory/clear-owner/${date}`, {
+          method: "DELETE"
+        });
+        return await response.json();
+      } catch (error) {
+        console.error("Помилка видалення головного:", error);
+        return { success: false };
+      }
+    }
+    
     // === ОСНОВНА ЛОГІКА ===
 
     async function startInventory() {
@@ -642,6 +689,33 @@
       
       inventoryDate = dateInput;
       document.getElementById("date-modal").classList.remove("active");
+      
+      // Перевіряємо чи є головний для цієї дати
+      const owner = await getOwner(inventoryDate);
+      
+      if (owner) {
+        // Є головний
+        inventoryOwner = owner.owner;
+        isOwner = (owner.owner === currentUserName);
+        
+        if (!isOwner) {
+          showMessage(`ℹ️ Інвентаризацію розпочав: ${owner.owner}. Тільки ${owner.owner} може завершити інвентаризацію.`, "info");
+        }
+      } else {
+        // Немає головного - ставимо поточного користувача
+        const result = await setAsOwner(inventoryDate);
+        
+        if (result.success && result.isOwner) {
+          inventoryOwner = currentUserName;
+          isOwner = true;
+          console.log("👑 Ви стали головним інвентаризації");
+        } else if (!result.isOwner && result.owner) {
+          // Хтось інший став головним паралельно
+          inventoryOwner = result.owner;
+          isOwner = false;
+          showMessage(`ℹ️ Інвентаризацію розпочав: ${result.owner}`, "info");
+        }
+      }
       
       // Завантажуємо чернетку з localStorage
       loadDraft();
@@ -737,12 +811,29 @@
       });
       
       if (Object.keys(inventoryData).length > 0) {
-        const saveAllBtn = document.createElement("button");
-        saveAllBtn.className = "save-btn";
-        saveAllBtn.textContent = "✅ Провести інвентаризацію";
-        saveAllBtn.style.gridColumn = "1 / -1";
-        saveAllBtn.onclick = checkAndSaveAll;
-        selector.appendChild(saveAllBtn);
+        if (isOwner) {
+          // Тільки головний бачить кнопку завершення
+          const saveAllBtn = document.createElement("button");
+          saveAllBtn.className = "save-btn";
+          saveAllBtn.textContent = "✅ Провести інвентаризацію";
+          saveAllBtn.style.gridColumn = "1 / -1";
+          saveAllBtn.onclick = checkAndSaveAll;
+          selector.appendChild(saveAllBtn);
+        } else {
+          // Інші бачать повідомлення
+          const infoDiv = document.createElement("div");
+          infoDiv.style.gridColumn = "1 / -1";
+          infoDiv.style.padding = "20px";
+          infoDiv.style.background = "#fef3c7";
+          infoDiv.style.borderRadius = "10px";
+          infoDiv.style.textAlign = "center";
+          infoDiv.style.fontSize = "1.1em";
+          infoDiv.innerHTML = `
+            🔒 Тільки <strong>${inventoryOwner}</strong> може завершити інвентаризацію<br>
+            <span style="font-size: 0.9em; color: #666;">Продовжуйте заповнювати холодильники. Дані автоматично зберігаються.</span>
+          `;
+          selector.appendChild(infoDiv);
+        }
       }
     }
 
@@ -1194,8 +1285,13 @@
           modal.innerHTML = `<div class="modal-content">${modalHtml}</div>`;
           document.body.appendChild(modal);
           
+          // Видаляємо головного після завершення
+          await clearOwner(inventoryDate);
+          
           inventoryData = {};
           inventoryDate = null;
+          inventoryOwner = null;
+          isOwner = false;
           hasUnsavedChanges = false;
           clearDraft();
           stopAutosave();

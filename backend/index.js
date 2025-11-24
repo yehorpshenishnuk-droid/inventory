@@ -9,7 +9,11 @@ import {
   readInventorySheetData,
   checkInventorySheetExists,
   sheets,
-  SPREADSHEET_ID
+  SPREADSHEET_ID,
+  lockLocation,
+  unlockLocation,
+  checkLock,
+  getAllLocks
 } from "./googleSheets.js";
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
 
@@ -276,6 +280,83 @@ app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
     
   } catch (error) {
     console.error("❌ Помилка при експорті PDF:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 🔒 API ДЛЯ БЛОКУВАНЬ
+
+// Заблокувати холодильник/стелаж
+app.post("/api/locks/lock", async (req, res) => {
+  try {
+    const { locationNumber, userName } = req.body;
+    
+    if (!locationNumber || !userName) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Не вказано номер або ім'я користувача" 
+      });
+    }
+    
+    const result = await lockLocation(locationNumber, userName);
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Помилка блокування:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Розблокувати холодильник/стелаж
+app.delete("/api/locks/unlock/:locationNumber", async (req, res) => {
+  try {
+    const { locationNumber } = req.params;
+    const result = await unlockLocation(locationNumber);
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Помилка розблокування:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Перевірити блокування конкретного холодильника
+app.get("/api/locks/check/:locationNumber", async (req, res) => {
+  try {
+    const { locationNumber } = req.params;
+    const lock = await checkLock(locationNumber);
+    
+    if (lock) {
+      res.json({ 
+        locked: true, 
+        ...lock 
+      });
+    } else {
+      res.json({ locked: false });
+    }
+  } catch (error) {
+    console.error("❌ Помилка перевірки:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Отримати всі блокування
+app.get("/api/locks/all", async (req, res) => {
+  try {
+    const locks = await getAllLocks();
+    res.json({ success: true, locks });
+  } catch (error) {
+    console.error("❌ Помилка отримання блокувань:", error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

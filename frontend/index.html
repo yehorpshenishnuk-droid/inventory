@@ -438,9 +438,10 @@
     <div id="auth-modal" class="modal active">
       <div class="modal-content">
         <h2>🔐 Авторизація</h2>
-        <p style="color: #666; margin-bottom: 20px;">Введіть код доступу</p>
+        <p style="color: #666; margin-bottom: 20px;">Введіть код доступу та ваше ім'я</p>
         <input type="password" id="auth-code" placeholder="Код доступу" />
-        <p id="auth-error" class="error-text" style="display: none;">Невірний код</p>
+        <input type="text" id="user-name" placeholder="Ваше ім'я (наприклад: Іван)" style="margin-top: 15px;" />
+        <p id="auth-error" class="error-text" style="display: none;">Заповніть всі поля</p>
         <button onclick="checkAuth()">Увійти</button>
       </div>
     </div>
@@ -521,6 +522,7 @@
     let hasUnsavedChanges = false;
     let autosaveInterval = null;
     let isExistingInventory = false;
+    let currentUserName = ""; // Ім'я поточного користувача
     
     // Визначення типу холодильника/стелажа
     const SHELVES = ['3', '4', '8', '16']; // Номери стелажів
@@ -536,15 +538,35 @@
     // Перевірка авторизації
     function checkAuth() {
       const code = document.getElementById("auth-code").value;
+      const userName = document.getElementById("user-name").value.trim();
+      
+      if (!userName) {
+        document.getElementById("auth-error").textContent = "Будь ласка, введіть ваше ім'я";
+        document.getElementById("auth-error").style.display = "block";
+        return;
+      }
+      
       if (code === AUTH_CODE) {
+        currentUserName = userName;
+        localStorage.setItem("userName", userName); // Зберігаємо ім'я
+        
         document.getElementById("auth-modal").classList.remove("active");
         document.getElementById("date-modal").classList.add("active");
         // Встановлюємо сьогоднішню дату
         document.getElementById("inventory-date").valueAsDate = new Date();
       } else {
+        document.getElementById("auth-error").textContent = "Невірний код";
         document.getElementById("auth-error").style.display = "block";
       }
     }
+    
+    // Завантажити збережене ім'я при завантаженні сторінки
+    window.addEventListener("DOMContentLoaded", () => {
+      const savedName = localStorage.getItem("userName");
+      if (savedName) {
+        document.getElementById("user-name").value = savedName;
+      }
+    });
 
     // Enter для авторизації
     document.getElementById("auth-code")?.addEventListener("keypress", (e) => {
@@ -552,6 +574,65 @@
     });
 
     // Початок інвентаризації
+    // === ФУНКЦІЇ БЛОКУВАННЯ ===
+    
+    // Перевірити чи заблокований холодильник/стелаж
+    async function checkLocationLock(locationNumber) {
+      try {
+        const response = await fetch(`${API_URL}/api/locks/check/${locationNumber}`);
+        const result = await response.json();
+        return result.locked ? result : null;
+      } catch (error) {
+        console.error("Помилка перевірки блокування:", error);
+        return null;
+      }
+    }
+    
+    // Заблокувати холодильник/стелаж
+    async function lockLocation(locationNumber) {
+      try {
+        const response = await fetch(`${API_URL}/api/locks/lock`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            locationNumber: String(locationNumber),
+            userName: currentUserName
+          })
+        });
+        return await response.json();
+      } catch (error) {
+        console.error("Помилка блокування:", error);
+        return { success: false, error: error.message };
+      }
+    }
+    
+    // Розблокувати холодильник/стелаж
+    async function unlockLocation(locationNumber) {
+      try {
+        const response = await fetch(`${API_URL}/api/locks/unlock/${locationNumber}`, {
+          method: "DELETE"
+        });
+        return await response.json();
+      } catch (error) {
+        console.error("Помилка розблокування:", error);
+        return { success: false };
+      }
+    }
+    
+    // Отримати всі блокування
+    async function getAllLocationLocks() {
+      try {
+        const response = await fetch(`${API_URL}/api/locks/all`);
+        const result = await response.json();
+        return result.success ? result.locks : {};
+      } catch (error) {
+        console.error("Помилка отримання блокувань:", error);
+        return {};
+      }
+    }
+    
+    // === ОСНОВНА ЛОГІКА ===
+
     async function startInventory() {
       const dateInput = document.getElementById("inventory-date").value;
       if (!dateInput) {
@@ -613,12 +694,20 @@
     }
 
     // Показати екран вибору холодильників
-    function showFridgeSelector() {
+    async function showFridgeSelector() {
+      // Розблокувати поточний холодильник якщо був відкритий
+      if (currentFridge) {
+        await unlockLocation(currentFridge.fridgeNumber);
+      }
+      
       document.getElementById("fridge-selector").style.display = "grid";
       document.getElementById("product-list").classList.remove("active");
       
       const selector = document.getElementById("fridge-selector");
       selector.innerHTML = "";
+      
+      // Отримуємо всі блокування
+      const locks = await getAllLocationLocks();
       
       allFridges.forEach(fridge => {
         const card = document.createElement("div");
@@ -631,11 +720,16 @@
           card.classList.add("selected");
         }
         
+        // Перевіряємо чи заблокований
+        const lock = locks[fridge.fridgeNumber];
+        const isLockedByOther = lock && lock.userName !== currentUserName;
+        
         card.innerHTML = `
           <div class="fridge-icon">${getFridgeIcon(fridge.fridgeNumber)}</div>
           <div class="fridge-number">${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}</div>
           <div class="fridge-count">${fridge.products.length} позицій</div>
           ${hasData ? '<div style="margin-top: 10px;">✅ Заповнено</div>' : ''}
+          ${isLockedByOther ? `<div style="margin-top: 10px; color: #ef4444;">🔒 Рахує: ${lock.userName}</div>` : ''}
         `;
         
         card.onclick = () => showProducts(fridge);
@@ -653,7 +747,22 @@
     }
 
     // Показати продукти холодильника
-    function showProducts(fridge) {
+    async function showProducts(fridge) {
+      // Перевіряємо блокування
+      const lock = await checkLocationLock(fridge.fridgeNumber);
+      
+      if (lock && lock.userName !== currentUserName) {
+        alert(`❌ ${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber} зараз рахує: ${lock.userName}\n\nПочав о ${lock.time}\n\nЗачекайте поки ${lock.userName} завершить роботу.`);
+        return;
+      }
+      
+      // Блокуємо холодильник
+      const lockResult = await lockLocation(fridge.fridgeNumber);
+      if (!lockResult.success && lockResult.error) {
+        alert(`❌ Помилка блокування: ${lockResult.error}`);
+        return;
+      }
+      
       currentFridge = fridge;
       currentProducts = fridge.products;
       document.getElementById("fridge-selector").style.display = "none";
@@ -1113,6 +1222,16 @@
 
     // Попередження перед виходом
     window.addEventListener("beforeunload", (e) => {
+      // Розблокувати холодильник при закритті вкладки
+      if (currentFridge) {
+        // Використовуємо navigator.sendBeacon для надійного відправлення при закритті
+        const data = JSON.stringify({});
+        fetch(`${API_URL}/api/locks/unlock/${currentFridge.fridgeNumber}`, {
+          method: "DELETE",
+          keepalive: true // Важливо для роботи при закритті вкладки
+        }).catch(() => {}); // Ігноруємо помилки
+      }
+      
       if (hasUnsavedChanges || Object.keys(inventoryData).length > 0) {
         e.preventDefault();
         e.returnValue = "Ваші зміни можуть бути втрачені. Вийти все одно?";

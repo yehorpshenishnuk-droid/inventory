@@ -22,6 +22,225 @@ const MASTER_SHEET_NAME = "Лист1"; // Головний аркуш з шаб�
 // Експортуємо для використання в інших модулях
 export { sheets, SPREADSHEET_ID };
 
+// === БЛОКУВАННЯ ХОЛОДИЛЬНИКІВ ===
+
+const LOCKS_SHEET_NAME = "Блокування";
+
+// Перевірка чи існує аркуш "Блокування", якщо ні - створити
+async function ensureLocksSheetExists() {
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const locksSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === LOCKS_SHEET_NAME
+    );
+    
+    if (!locksSheet) {
+      // Створюємо аркуш
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: LOCKS_SHEET_NAME
+              }
+            }
+          }]
+        }
+      });
+      
+      // Додаємо заголовки
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${LOCKS_SHEET_NAME}!A1:D1`,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [["Холодильник/Стелаж", "Користувач", "Час початку", "Дата"]]
+        }
+      });
+      
+      console.log("✅ Створено аркуш 'Блокування'");
+    }
+  } catch (error) {
+    console.error("❌ Помилка створення аркуша блокувань:", error);
+  }
+}
+
+// Заблокувати холодильник/стелаж
+export async function lockLocation(locationNumber, userName) {
+  try {
+    await ensureLocksSheetExists();
+    
+    // Перевіряємо чи не заблокований вже
+    const existingLock = await checkLock(locationNumber);
+    if (existingLock) {
+      return { 
+        success: false, 
+        error: `Вже заблоковано користувачем ${existingLock.userName}` 
+      };
+    }
+    
+    const now = new Date();
+    const time = now.toLocaleTimeString('uk-UA');
+    const date = now.toLocaleDateString('uk-UA');
+    
+    // Додаємо новий запис
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A:D`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[locationNumber, userName, time, date]]
+      }
+    });
+    
+    console.log(`🔒 Заблоковано: ${locationNumber} → ${userName}`);
+    return { success: true };
+  } catch (error) {
+    console.error("❌ Помилка блокування:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Розблокувати холодильник/стелаж
+export async function unlockLocation(locationNumber) {
+  try {
+    await ensureLocksSheetExists();
+    
+    // Читаємо всі блокування
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A2:D`
+    });
+    
+    const rows = response.data.values || [];
+    let rowToDelete = -1;
+    
+    // Шукаємо рядок з цим холодильником
+    rows.forEach((row, index) => {
+      if (row[0] === String(locationNumber)) {
+        rowToDelete = index + 2; // +2 бо рахуємо з заголовка
+      }
+    });
+    
+    if (rowToDelete > 0) {
+      // Видаляємо рядок
+      const sheetId = (await sheets.spreadsheets.get({
+        spreadsheetId: SPREADSHEET_ID
+      })).data.sheets.find(s => s.properties.title === LOCKS_SHEET_NAME)?.properties?.sheetId;
+      
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            deleteDimension: {
+              range: {
+                sheetId: sheetId,
+                dimension: "ROWS",
+                startIndex: rowToDelete - 1,
+                endIndex: rowToDelete
+              }
+            }
+          }]
+        }
+      });
+      
+      console.log(`🔓 Розблоковано: ${locationNumber}`);
+      return { success: true };
+    }
+    
+    return { success: true, message: "Не було заблоковано" };
+  } catch (error) {
+    console.error("❌ Помилка розблокування:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Перевірити чи заблокований
+export async function checkLock(locationNumber) {
+  try {
+    await ensureLocksSheetExists();
+    
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A2:D`
+    });
+    
+    const rows = response.data.values || [];
+    
+    for (const row of rows) {
+      if (row[0] === String(locationNumber)) {
+        // Перевіряємо чи не застаріло (більше 30 хвилин)
+        const lockTime = row[2]; // Час
+        const lockDate = row[3]; // Дата
+        
+        const lockDateTime = new Date(`${lockDate} ${lockTime}`);
+        const now = new Date();
+        const diffMinutes = (now - lockDateTime) / 1000 / 60;
+        
+        if (diffMinutes > 30) {
+          // Автоматично розблокувати
+          await unlockLocation(locationNumber);
+          console.log(`⏰ Автоматично розблоковано (таймаут): ${locationNumber}`);
+          return null;
+        }
+        
+        return {
+          locationNumber: row[0],
+          userName: row[1],
+          time: row[2],
+          date: row[3]
+        };
+      }
+    }
+    
+    return null; // Не заблокований
+  } catch (error) {
+    console.error("❌ Помилка перевірки блокування:", error);
+    return null;
+  }
+}
+
+// Отримати всі блокування
+export async function getAllLocks() {
+  try {
+    await ensureLocksSheetExists();
+    
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A2:D`
+    });
+    
+    const rows = response.data.values || [];
+    const locks = {};
+    
+    for (const row of rows) {
+      // Перевіряємо таймаут
+      const lockTime = row[2];
+      const lockDate = row[3];
+      const lockDateTime = new Date(`${lockDate} ${lockTime}`);
+      const now = new Date();
+      const diffMinutes = (now - lockDateTime) / 1000 / 60;
+      
+      if (diffMinutes <= 30) {
+        locks[row[0]] = {
+          userName: row[1],
+          time: row[2],
+          date: row[3]
+        };
+      }
+    }
+    
+    return locks;
+  } catch (error) {
+    console.error("❌ Помилка отримання блокувань:", error);
+    return {};
+  }
+}
+
 // 📥 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS
 export async function readProductsFromSheet() {
   try {

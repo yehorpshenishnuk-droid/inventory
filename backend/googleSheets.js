@@ -22,6 +22,15 @@ const MASTER_SHEET_NAME = "Лист1"; // Головний аркуш з шаб�
 // Експортуємо для використання в інших модулях
 export { sheets, SPREADSHEET_ID };
 
+// ✅ КЕШ ДЛЯ ЗМЕНШЕННЯ КІЛЬКОСТІ ЗАПИТІВ
+let locksCache = null;
+let locksCacheTime = 0;
+const LOCKS_CACHE_TTL = 5000; // 5 секунд
+
+let sheetsListCache = null;
+let sheetsListCacheTime = 0;
+const SHEETS_LIST_CACHE_TTL = 30000; // 30 секунд
+
 // === БЛОКУВАННЯ ХОЛОДИЛЬНИКІВ ===
 
 const LOCKS_SHEET_NAME = "Блокування";
@@ -29,9 +38,22 @@ const LOCKS_SHEET_NAME = "Блокування";
 // Перевірка чи існує аркуш "Блокування", якщо ні - створити
 async function ensureLocksSheetExists() {
   try {
+    // ✅ КЕШУВАННЯ - використовуємо кеш якщо він свіжий
+    const now = Date.now();
+    if (sheetsListCache && (now - sheetsListCacheTime < SHEETS_LIST_CACHE_TTL)) {
+      const locksSheet = sheetsListCache.find(
+        sheet => sheet.properties.title === LOCKS_SHEET_NAME
+      );
+      if (locksSheet) return;
+    }
+    
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID
     });
+    
+    // ✅ ОНОВЛЮЄМО КЕШ
+    sheetsListCache = spreadsheet.data.sheets;
+    sheetsListCacheTime = now;
     
     const locksSheet = spreadsheet.data.sheets.find(
       sheet => sheet.properties.title === LOCKS_SHEET_NAME
@@ -61,6 +83,9 @@ async function ensureLocksSheetExists() {
           values: [["Холодильник/Стелаж", "Користувач", "Час початку", "Дата"]]
         }
       });
+      
+      // ✅ СКИДАЄМО КЕШ після створення нового аркуша
+      sheetsListCache = null;
       
       console.log("✅ Створено аркуш 'Блокування'");
     }
@@ -96,6 +121,9 @@ export async function lockLocation(locationNumber, userName) {
         values: [[locationNumber, userName, time, date]]
       }
     });
+    
+    // ✅ СКИДАЄМО КЕШ після зміни
+    locksCache = null;
     
     console.log(`🔒 Заблоковано: ${locationNumber} → ${userName}`);
     return { success: true };
@@ -148,6 +176,9 @@ export async function unlockLocation(locationNumber) {
         }
       });
       
+      // ✅ СКИДАЄМО КЕШ після зміни
+      locksCache = null;
+      
       console.log(`🔓 Розблоковано: ${locationNumber}`);
       return { success: true };
     }
@@ -162,39 +193,29 @@ export async function unlockLocation(locationNumber) {
 // Перевірити чи заблокований
 export async function checkLock(locationNumber) {
   try {
-    await ensureLocksSheetExists();
+    // ✅ ВИКОРИСТОВУЄМО getAllLocks яка має кеш
+    const allLocks = await getAllLocks();
+    const lock = allLocks[String(locationNumber)];
     
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${LOCKS_SHEET_NAME}!A2:D`
-    });
-    
-    const rows = response.data.values || [];
-    
-    for (const row of rows) {
-      if (row[0] === String(locationNumber)) {
-        // Перевіряємо чи не застаріло (більше 30 хвилин)
-        const lockTime = row[2]; // Час
-        const lockDate = row[3]; // Дата
-        
-        const lockDateTime = new Date(`${lockDate} ${lockTime}`);
-        const now = new Date();
-        const diffMinutes = (now - lockDateTime) / 1000 / 60;
-        
-        if (diffMinutes > 30) {
-          // Автоматично розблокувати
-          await unlockLocation(locationNumber);
-          console.log(`⏰ Автоматично розблоковано (таймаут): ${locationNumber}`);
-          return null;
-        }
-        
-        return {
-          locationNumber: row[0],
-          userName: row[1],
-          time: row[2],
-          date: row[3]
-        };
+    if (lock) {
+      // Перевіряємо чи не застаріло (більше 30 хвилин)
+      const lockDateTime = new Date(`${lock.date} ${lock.time}`);
+      const now = new Date();
+      const diffMinutes = (now - lockDateTime) / 1000 / 60;
+      
+      if (diffMinutes > 30) {
+        // Автоматично розблокувати
+        await unlockLocation(locationNumber);
+        console.log(`⏰ Автоматично розблоковано (таймаут): ${locationNumber}`);
+        return null;
       }
+      
+      return {
+        locationNumber: String(locationNumber),
+        userName: lock.userName,
+        time: lock.time,
+        date: lock.date
+      };
     }
     
     return null; // Не заблокований
@@ -207,6 +228,12 @@ export async function checkLock(locationNumber) {
 // Отримати всі блокування
 export async function getAllLocks() {
   try {
+    // ✅ КЕШУВАННЯ - використовуємо кеш якщо він свіжий
+    const now = Date.now();
+    if (locksCache && (now - locksCacheTime < LOCKS_CACHE_TTL)) {
+      return locksCache;
+    }
+    
     await ensureLocksSheetExists();
     
     const response = await sheets.spreadsheets.values.get({
@@ -222,8 +249,8 @@ export async function getAllLocks() {
       const lockTime = row[2];
       const lockDate = row[3];
       const lockDateTime = new Date(`${lockDate} ${lockTime}`);
-      const now = new Date();
-      const diffMinutes = (now - lockDateTime) / 1000 / 60;
+      const currentTime = new Date();
+      const diffMinutes = (currentTime - lockDateTime) / 1000 / 60;
       
       if (diffMinutes <= 30) {
         locks[row[0]] = {
@@ -233,6 +260,10 @@ export async function getAllLocks() {
         };
       }
     }
+    
+    // ✅ ОНОВЛЮЄМО КЕШ
+    locksCache = locks;
+    locksCacheTime = now;
     
     return locks;
   } catch (error) {
@@ -567,11 +598,18 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
       const columnLetter = String.fromCharCode(65 + index); // A=65, B=66...
       
       // Шукаємо колонки типу "Холодильник 1", "Холодильник 2" і т.д.
-      const match = header?.match(/Холодильник\s+(\d+)/i);
-      if (match) {
-        const fridgeNum = match[1];
-        fridgeColumns[fridgeNum] = columnLetter;
-        console.log(`📋 Знайдено: Холодильник ${fridgeNum} → колонка ${columnLetter}`);
+      // Шукаємо колонки з холодильниками ТА стелажами
+      const fridgeMatch = header?.match(/Холодильник\s+(\d+)/i);
+      const shelfMatch = header?.match(/Стелаж\s+(\d+)/i);
+      
+      if (fridgeMatch) {
+        const locationNum = fridgeMatch[1];
+        fridgeColumns[locationNum] = columnLetter;
+        console.log(`📋 Знайдено: Холодильник ${locationNum} → колонка ${columnLetter}`);
+      } else if (shelfMatch) {
+        const locationNum = shelfMatch[1];
+        fridgeColumns[locationNum] = columnLetter;
+        console.log(`📋 Знайдено: Стелаж ${locationNum} → колонка ${columnLetter}`);
       }
       
       // Шукаємо колонку "Залишки"

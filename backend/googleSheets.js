@@ -26,6 +26,25 @@ export { sheets, SPREADSHEET_ID };
 
 const LOCKS_SHEET_NAME = "Блокування";
 
+// 🆕 КЕШ БЛОКУВАНЬ В ПАМ'ЯТІ (замість Google Sheets)
+const locksCache = new Map(); // { locationNumber: { userName, time, timestamp } }
+
+// Очищення застарілих блокувань (>30 хвилин)
+function cleanExpiredLocks() {
+  const now = Date.now();
+  const timeout = 30 * 60 * 1000; // 30 хвилин в мілісекундах
+  
+  for (const [locationNumber, lock] of locksCache.entries()) {
+    if (now - lock.timestamp > timeout) {
+      locksCache.delete(locationNumber);
+      console.log(`⏰ Автоматично розблоковано (таймаут): ${locationNumber}`);
+    }
+  }
+}
+
+// Запускаємо очищення кожні 5 хвилин
+setInterval(cleanExpiredLocks, 5 * 60 * 1000);
+
 // Перевірка чи існує аркуш "Блокування", якщо ні - створити
 async function ensureLocksSheetExists() {
   try {
@@ -69,35 +88,33 @@ async function ensureLocksSheetExists() {
   }
 }
 
-// Заблокувати холодильник/стелаж
+// Заблокувати холодильник/стелаж (В ПАМ'ЯТІ)
 export async function lockLocation(locationNumber, userName) {
   try {
-    await ensureLocksSheetExists();
+    // Очищуємо застарілі блокування
+    cleanExpiredLocks();
     
     // Перевіряємо чи не заблокований вже
-    const existingLock = await checkLock(locationNumber);
+    const existingLock = locksCache.get(String(locationNumber));
+    
     if (existingLock) {
+      // Блокування активне
       return { 
         success: false, 
         error: `Вже заблоковано користувачем ${existingLock.userName}` 
       };
     }
     
+    // Додаємо блокування в кеш
     const now = new Date();
-    const time = now.toLocaleTimeString('uk-UA');
-    const date = now.toLocaleDateString('uk-UA');
-    
-    // Додаємо новий запис
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${LOCKS_SHEET_NAME}!A:D`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [[locationNumber, userName, time, date]]
-      }
+    locksCache.set(String(locationNumber), {
+      userName,
+      time: now.toLocaleTimeString('uk-UA'),
+      date: now.toLocaleDateString('uk-UA'),
+      timestamp: now.getTime()
     });
     
-    console.log(`🔒 Заблоковано: ${locationNumber} → ${userName}`);
+    console.log(`🔒 Заблоковано (пам'ять): ${locationNumber} → ${userName}`);
     return { success: true };
   } catch (error) {
     console.error("❌ Помилка блокування:", error);
@@ -105,50 +122,13 @@ export async function lockLocation(locationNumber, userName) {
   }
 }
 
-// Розблокувати холодильник/стелаж
+// Розблокувати холодильник/стелаж (З ПАМ'ЯТІ)
 export async function unlockLocation(locationNumber) {
   try {
-    await ensureLocksSheetExists();
+    const deleted = locksCache.delete(String(locationNumber));
     
-    // Читаємо всі блокування
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${LOCKS_SHEET_NAME}!A2:D`
-    });
-    
-    const rows = response.data.values || [];
-    let rowToDelete = -1;
-    
-    // Шукаємо рядок з цим холодильником
-    rows.forEach((row, index) => {
-      if (row[0] === String(locationNumber)) {
-        rowToDelete = index + 2; // +2 бо рахуємо з заголовка
-      }
-    });
-    
-    if (rowToDelete > 0) {
-      // Видаляємо рядок
-      const sheetId = (await sheets.spreadsheets.get({
-        spreadsheetId: SPREADSHEET_ID
-      })).data.sheets.find(s => s.properties.title === LOCKS_SHEET_NAME)?.properties?.sheetId;
-      
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          requests: [{
-            deleteDimension: {
-              range: {
-                sheetId: sheetId,
-                dimension: "ROWS",
-                startIndex: rowToDelete - 1,
-                endIndex: rowToDelete
-              }
-            }
-          }]
-        }
-      });
-      
-      console.log(`🔓 Розблоковано: ${locationNumber}`);
+    if (deleted) {
+      console.log(`🔓 Розблоковано (пам'ять): ${locationNumber}`);
       return { success: true };
     }
     
@@ -160,41 +140,21 @@ export async function unlockLocation(locationNumber) {
 }
 
 // Перевірити чи заблокований
+// Перевірити блокування (З ПАМ'ЯТІ)
 export async function checkLock(locationNumber) {
   try {
-    await ensureLocksSheetExists();
+    // Очищуємо застарілі
+    cleanExpiredLocks();
     
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${LOCKS_SHEET_NAME}!A2:D`
-    });
+    const lock = locksCache.get(String(locationNumber));
     
-    const rows = response.data.values || [];
-    
-    for (const row of rows) {
-      if (row[0] === String(locationNumber)) {
-        // Перевіряємо чи не застаріло (більше 30 хвилин)
-        const lockTime = row[2]; // Час
-        const lockDate = row[3]; // Дата
-        
-        const lockDateTime = new Date(`${lockDate} ${lockTime}`);
-        const now = new Date();
-        const diffMinutes = (now - lockDateTime) / 1000 / 60;
-        
-        if (diffMinutes > 30) {
-          // Автоматично розблокувати
-          await unlockLocation(locationNumber);
-          console.log(`⏰ Автоматично розблоковано (таймаут): ${locationNumber}`);
-          return null;
-        }
-        
-        return {
-          locationNumber: row[0],
-          userName: row[1],
-          time: row[2],
-          date: row[3]
-        };
-      }
+    if (lock) {
+      return {
+        locationNumber: String(locationNumber),
+        userName: lock.userName,
+        time: lock.time,
+        date: lock.date
+      };
     }
     
     return null; // Не заблокований
@@ -205,39 +165,28 @@ export async function checkLock(locationNumber) {
 }
 
 // Отримати всі блокування
+// Отримати всі блокування (З ПАМ'ЯТІ)
 export async function getAllLocks() {
   try {
-    await ensureLocksSheetExists();
+    // Очищуємо застарілі
+    cleanExpiredLocks();
     
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${LOCKS_SHEET_NAME}!A2:D`
-    });
-    
-    const rows = response.data.values || [];
     const locks = {};
     
-    for (const row of rows) {
-      // Перевіряємо таймаут
-      const lockTime = row[2];
-      const lockDate = row[3];
-      const lockDateTime = new Date(`${lockDate} ${lockTime}`);
-      const now = new Date();
-      const diffMinutes = (now - lockDateTime) / 1000 / 60;
-      
-      if (diffMinutes <= 30) {
-        locks[row[0]] = {
-          userName: row[1],
-          time: row[2],
-          date: row[3]
-        };
-      }
+    for (const [locationNumber, lock] of locksCache.entries()) {
+      locks[locationNumber] = {
+        userName: lock.userName,
+        time: lock.time,
+        date: lock.date
+      };
     }
     
     return locks;
   } catch (error) {
     console.error("❌ Помилка отримання блокувань:", error);
     return {};
+  }
+}
   }
 }
 
@@ -305,9 +254,28 @@ export async function readProductsFromSheet() {
   }
 }
 
+// 🆕 КЕШ ДАНИХ ІНВЕНТАРИЗАЦІЇ
+const inventoryCache = new Map(); // { date: { data, timestamp } }
+const CACHE_TTL = 10 * 1000; // 10 секунд
+
+// Перевірка чи кеш актуальний
+function isCacheValid(cacheEntry) {
+  if (!cacheEntry) return false;
+  return (Date.now() - cacheEntry.timestamp) < CACHE_TTL;
+}
+
 // 🆕 ЧИТАННЯ ДАНИХ З КОНКРЕТНОГО АРКУША ІНВЕНТАРИЗАЦІЇ
 export async function readInventorySheetData(date) {
   try {
+    // Перевіряємо кеш
+    const cacheKey = `inventory_${date}`;
+    const cached = inventoryCache.get(cacheKey);
+    
+    if (isCacheValid(cached)) {
+      console.log(`📦 Завантажено з кеша: ${date}`);
+      return cached.data;
+    }
+    
     const sheetName = `Інвентаризація ${date}`;
     
     // Перевіряємо чи існує такий аркуш
@@ -406,6 +374,13 @@ export async function readInventorySheetData(date) {
     });
     
     console.log(`📋 Прочитано ${products.length} продуктів з аркуша "${sheetName}" (з залишками)`);
+    
+    // Зберігаємо в кеш
+    inventoryCache.set(cacheKey, {
+      data: products,
+      timestamp: Date.now()
+    });
+    
     return products;
   } catch (error) {
     console.error("❌ Помилка при читанні аркуша інвентаризації:", error);
@@ -649,6 +624,13 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     });
     
     console.log(`✅ Оновлено ${updates.length} комірок у аркуші "${sheetName}"`);
+    
+    // Інвалідуємо кеш для цієї дати
+    const date = sheetName.replace("Інвентаризація ", "");
+    const cacheKey = `inventory_${date}`;
+    inventoryCache.delete(cacheKey);
+    console.log(`🗑️ Кеш інвалідовано для ${date}`);
+    
   } catch (error) {
     console.error("❌ Помилка при запису залишків:", error);
     throw error;

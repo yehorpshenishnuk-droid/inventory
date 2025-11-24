@@ -643,6 +643,27 @@
       inventoryDate = dateInput;
       document.getElementById("date-modal").classList.remove("active");
       
+      // ✅ СТВОРЮЄМО АРКУШ ОДРАЗУ ПРИ ВИБОРІ ДАТИ
+      try {
+        const response = await fetch(`${API_URL}/api/inventory/init-sheet`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inventoryDate })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          if (result.existed) {
+            console.log(`📋 Продовжую існуючу інвентаризацію: ${result.sheetName}`);
+          } else {
+            console.log(`✅ Створено новий аркуш: ${result.sheetName}`);
+          }
+        }
+      } catch (error) {
+        console.error("❌ Помилка створення аркуша:", error);
+      }
+      
       // Завантажуємо чернетку з localStorage
       loadDraft();
       
@@ -1243,8 +1264,9 @@
     function startAutosave() {
       autosaveInterval = setInterval(() => {
         saveDraft();
+        saveToGoogleSheets(); // ✅ АВТОЗБЕРЕЖЕННЯ В GOOGLE SHEETS
         showAutosaveIndicator();
-      }, 5000); // Кожні 5 секунд
+      }, 10000); // Кожні 10 секунд (щоб не перевантажувати API)
     }
 
     function stopAutosave() {
@@ -1260,6 +1282,50 @@
         timestamp: new Date().toISOString()
       };
       localStorage.setItem("inventory_draft", JSON.stringify(draft));
+    }
+    
+    // ✅ АВТОЗБЕРЕЖЕННЯ В GOOGLE SHEETS
+    async function saveToGoogleSheets() {
+      // Перевіряємо чи є дані для збереження
+      if (!inventoryData || Object.keys(inventoryData).length === 0) {
+        return;
+      }
+      
+      try {
+        // Готуємо дані - тільки заповнені позиції
+        const fridgeArray = Object.keys(inventoryData).map(fridgeNumber => ({
+          fridgeNumber,
+          products: inventoryData[fridgeNumber]
+            .filter(p => p.quantity !== "") // Тільки заповнені
+            .map(p => ({
+              name: p.name,
+              quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
+            }))
+        })).filter(f => f.products.length > 0); // Тільки холодильники з даними
+        
+        if (fridgeArray.length === 0) {
+          return; // Немає даних для збереження
+        }
+        
+        // Відправляємо на сервер
+        const response = await fetch(`${API_URL}/api/inventory/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            inventoryData: fridgeArray,
+            inventoryDate: inventoryDate
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          console.log("💾 Автозбереження в Google Sheets успішне");
+        }
+      } catch (error) {
+        console.error("⚠️ Помилка автозбереження:", error);
+        // Не показуємо помилку користувачу, щоб не заважати роботі
+      }
     }
 
     function loadDraft() {

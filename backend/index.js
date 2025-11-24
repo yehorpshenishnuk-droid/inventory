@@ -14,8 +14,7 @@ import {
   lockLocation,
   unlockLocation,
   checkLock,
-  getAllLocks,
-  refreshLocksCache
+  getAllLocks
 } from "./googleSheets.js";
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
 
@@ -407,20 +406,6 @@ app.get("/api/locks/all", async (req, res) => {
     res.json({ success: true, locks });
   } catch (error) {
     console.error("❌ Помилка отримання блокувань:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Примусово оновити кеш блокувань
-app.post("/api/locks/refresh", async (req, res) => {
-  try {
-    const locks = await refreshLocksCache();
-    res.json({ success: true, locks });
-  } catch (error) {
-    console.error("❌ Помилка оновлення кешу:", error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

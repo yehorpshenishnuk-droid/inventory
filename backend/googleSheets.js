@@ -25,7 +25,7 @@ export { sheets, SPREADSHEET_ID };
 // ✅ КЕШ ДЛЯ ЗМЕНШЕННЯ КІЛЬКОСТІ ЗАПИТІВ
 let locksCache = null;
 let locksCacheTime = 0;
-const LOCKS_CACHE_TTL = 5000; // 5 секунд
+const LOCKS_CACHE_TTL = 2000; // 2 секунди (було 5 - занадто довго для UI)
 
 let sheetsListCache = null;
 let sheetsListCacheTime = 0;
@@ -270,6 +270,12 @@ export async function getAllLocks() {
     console.error("❌ Помилка отримання блокувань:", error);
     return {};
   }
+}
+
+// ✅ ПРИМУСОВО ОНОВИТИ КЕШ БЛОКУВАНЬ (для UI)
+export async function refreshLocksCache() {
+  locksCache = null; // Скидаємо кеш
+  return await getAllLocks(); // Завантажуємо свіжі дані
 }
 
 // 📥 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS

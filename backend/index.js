@@ -13,13 +13,7 @@ import {
   lockLocation,
   unlockLocation,
   checkLock,
-  getAllLocks,
-  lockInventory,
-  unlockInventory,
-  checkInventoryLock,
-  setInventoryOwner,
-  getInventoryOwner,
-  clearInventoryOwner
+  getAllLocks
 } from "./googleSheets.js";
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
 
@@ -109,21 +103,13 @@ app.get("/api/inventory/products", async (req, res) => {
   try {
     const { date } = req.query;
     
-    console.log("🔍 Запит на завантаження продуктів для дати:", date);
-    
     // Якщо передана дата, перевіряємо чи є вже інвентаризація за цю дату
     if (date) {
       const exists = await checkInventorySheetExists(date);
       
-      console.log("📊 Чи існує аркуш інвентаризації?", exists);
-      
       if (exists) {
-        console.log("✅ Завантажую дані з існуючого аркуша:", `Інвентаризація ${date}`);
-        
         // Завантажуємо дані з існуючого аркуша
         const inventoryData = await readInventorySheetData(date);
-        
-        console.log("📦 Завантажено продуктів:", inventoryData ? inventoryData.length : 0);
         
         if (inventoryData) {
           // Групуємо по холодильниках
@@ -152,15 +138,13 @@ app.get("/api/inventory/products", async (req, res) => {
             products: fridges[fridgeNum]
           }));
           
-          console.log(`📋 Відправлено дані існуючої інвентаризації за ${date} (${result.length} холодильників)`);
+          console.log(`📋 Відправлено дані існуючої інвентаризації за ${date}`);
           return res.json({ 
             data: result, 
             existingInventory: true,
             date 
           });
         }
-      } else {
-        console.log("⚠️ Аркуш не існує, завантажую з Лист1");
       }
     }
     
@@ -373,135 +357,6 @@ app.get("/api/locks/all", async (req, res) => {
     res.json({ success: true, locks });
   } catch (error) {
     console.error("❌ Помилка отримання блокувань:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Заблокувати всю інвентаризацію
-app.post("/api/inventory/lock", async (req, res) => {
-  try {
-    const { date, userName } = req.body;
-    
-    if (!date || !userName) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Не вказано дату або ім'я користувача" 
-      });
-    }
-    
-    const result = await lockInventory(date, userName);
-    res.json(result);
-  } catch (error) {
-    console.error("❌ Помилка блокування інвентаризації:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Розблокувати інвентаризацію
-app.delete("/api/inventory/unlock/:date", async (req, res) => {
-  try {
-    const { date } = req.params;
-    const result = await unlockInventory(date);
-    res.json(result);
-  } catch (error) {
-    console.error("❌ Помилка розблокування інвентаризації:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Перевірити чи заблокована інвентаризація
-app.get("/api/inventory/lock-status/:date", async (req, res) => {
-  try {
-    const { date } = req.params;
-    const lock = await checkInventoryLock(date);
-    
-    if (lock) {
-      res.json({ 
-        locked: true, 
-        ...lock 
-      });
-    } else {
-      res.json({ locked: false });
-    }
-  } catch (error) {
-    console.error("❌ Помилка перевірки блокування:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// 👑 API ДЛЯ ГОЛОВНИХ ІНВЕНТАРИЗАЦІЙ
-
-// Встановити головного для інвентаризації
-app.post("/api/inventory/set-owner", async (req, res) => {
-  try {
-    const { date, userName } = req.body;
-    
-    if (!date || !userName) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Не вказано дату або ім'я користувача" 
-      });
-    }
-    
-    const result = await setInventoryOwner(date, userName);
-    res.json(result);
-  } catch (error) {
-    console.error("❌ Помилка встановлення головного:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Отримати головного для інвентаризації
-app.get("/api/inventory/get-owner/:date", async (req, res) => {
-  try {
-    const { date } = req.params;
-    const owner = await getInventoryOwner(date);
-    
-    if (owner) {
-      res.json({ 
-        success: true,
-        hasOwner: true,
-        owner: owner.userName,
-        startTime: owner.time
-      });
-    } else {
-      res.json({ 
-        success: true,
-        hasOwner: false
-      });
-    }
-  } catch (error) {
-    console.error("❌ Помилка отримання головного:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Видалити головного (після завершення)
-app.delete("/api/inventory/clear-owner/:date", async (req, res) => {
-  try {
-    const { date } = req.params;
-    const result = await clearInventoryOwner(date);
-    res.json(result);
-  } catch (error) {
-    console.error("❌ Помилка видалення головного:", error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

@@ -520,7 +520,6 @@
     let currentProducts = [];
     let hasUnsavedChanges = false;
     let autosaveInterval = null;
-    let locksRefreshInterval = null; // ✅ Інтервал оновлення блокувань
     let isExistingInventory = false;
     let currentUserName = ""; // Ім'я поточного користувача
     
@@ -764,11 +763,6 @@
       const selector = document.getElementById("fridge-selector");
       selector.innerHTML = "";
       
-      // ✅ ПРИМУСОВО ОНОВЛЮЄМО КЕШ перед відображенням
-      await fetch(`${API_URL}/api/locks/refresh`, {
-        method: "POST"
-      }).catch(() => {}); // Ігноруємо помилки
-      
       // Отримуємо всі блокування
       const locks = await getAllLocationLocks();
       
@@ -807,46 +801,13 @@
         saveAllBtn.onclick = checkAndSaveAll;
         selector.appendChild(saveAllBtn);
       }
-      
-      // ✅ ЗАПУСКАЄМО АВТООНОВЛЕННЯ БЛОКУВАНЬ кожні 3 секунди
-      startLocksRefresh();
-    }
-    
-    // ✅ Запустити автооновлення блокувань
-    function startLocksRefresh() {
-      // Зупиняємо попередній інтервал якщо був
-      stopLocksRefresh();
-      
-      // Оновлюємо кожні 3 секунди
-      locksRefreshInterval = setInterval(async () => {
-        // Перевіряємо чи ми на екрані вибору
-        const selectorVisible = document.getElementById("fridge-selector").style.display === "grid";
-        if (selectorVisible) {
-          console.log("🔄 Автооновлення блокувань...");
-          await showFridgeSelector();
-        }
-      }, 3000);
-    }
-    
-    // ✅ Зупинити автооновлення
-    function stopLocksRefresh() {
-      if (locksRefreshInterval) {
-        clearInterval(locksRefreshInterval);
-        locksRefreshInterval = null;
-      }
     }
 
     // Показати продукти холодильника
     async function showProducts(fridge) {
       console.log("📂 Відкриваю холодильник:", fridge.fridgeNumber);
       
-      // ✅ ПРИМУСОВО ОНОВЛЮЄМО КЕШ БЛОКУВАНЬ перед перевіркою
-      console.log("🔄 Оновлюю кеш блокувань...");
-      await fetch(`${API_URL}/api/locks/refresh`, {
-        method: "POST"
-      });
-      
-      // Перевіряємо блокування (тепер зі свіжими даними)
+      // Перевіряємо блокування
       const lock = await checkLocationLock(fridge.fridgeNumber);
       
       if (lock && lock.userName !== currentUserName) {
@@ -861,9 +822,6 @@
         alert(`❌ Помилка блокування: ${lockResult.error}\n\nСпробуйте ще раз або зачекайте хвилину.`);
         return;
       }
-      
-      // ✅ ЗУПИНЯЄМО АВТООНОВЛЕННЯ (не потрібне на екрані продуктів)
-      stopLocksRefresh();
       
       // 🔄 ЗАВАНТАЖУЄМО СВІЖІ ДАНІ З СЕРВЕРА
       console.log("🔄 Завантажую свіжі дані для дати:", inventoryDate);

@@ -6,6 +6,7 @@ import {
   writeQuantitiesToSheet,
   createInventorySheet,
   writeQuantitiesToInventorySheet,
+  addQuantitiesToInventorySheet,
   readInventorySheetData,
   checkInventorySheetExists,
   sheets,
@@ -209,10 +210,19 @@ app.post("/api/inventory/save", async (req, res) => {
       });
     }
     
-    // Створюємо новий аркуш (він автоматично скопіює всі заголовки з Лист1)
-    const sheetName = await createInventorySheet(inventoryDate);
+    // Перевіряємо чи вже існує аркуш для цієї дати
+    const exists = await checkInventorySheetExists(inventoryDate);
     
-    // Готуємо дані по холодильниках (не сумуємо!)
+    let sheetName;
+    if (!exists) {
+      // Створюємо новий аркуш (він автоматично скопіює всі заголовки з Лист1)
+      sheetName = await createInventorySheet(inventoryDate);
+    } else {
+      sheetName = `Інвентаризація ${inventoryDate}`;
+      console.log(`📋 Аркуш вже існує: ${sheetName}`);
+    }
+    
+    // Готуємо дані по холодильниках
     const inventoryByFridge = {};
     
     inventoryData.forEach(fridge => {
@@ -222,8 +232,8 @@ app.post("/api/inventory/save", async (req, res) => {
       }));
     });
     
-    // Записуємо в новий аркуш (система сама знайде колонки холодильників)
-    await writeQuantitiesToInventorySheet(sheetName, inventoryByFridge);
+    // ✅ ДОДАЄМО до існуючих значень (а не перезаписуємо)
+    await addQuantitiesToInventorySheet(sheetName, inventoryByFridge);
     
     res.json({ 
       success: true, 
@@ -232,6 +242,45 @@ app.post("/api/inventory/save", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Помилка при збереженні залишків:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// 🆕 СТВОРИТИ АРКУШ ПРИ ВИБОРІ ДАТИ
+app.post("/api/inventory/init-sheet", async (req, res) => {
+  try {
+    const { inventoryDate } = req.body;
+    
+    if (!inventoryDate) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Не вказана дата інвентаризації" 
+      });
+    }
+    
+    // Перевіряємо чи вже існує
+    const exists = await checkInventorySheetExists(inventoryDate);
+    
+    let sheetName;
+    if (!exists) {
+      // Створюємо новий аркуш
+      sheetName = await createInventorySheet(inventoryDate);
+      console.log(`✅ Створено новий аркуш: ${sheetName}`);
+    } else {
+      sheetName = `Інвентаризація ${inventoryDate}`;
+      console.log(`ℹ️ Аркуш вже існує: ${sheetName}`);
+    }
+    
+    res.json({ 
+      success: true, 
+      sheetName,
+      existed: exists
+    });
+  } catch (error) {
+    console.error("❌ Помилка при створенні аркуша:", error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

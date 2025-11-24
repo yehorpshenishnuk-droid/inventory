@@ -232,8 +232,8 @@ app.post("/api/inventory/save", async (req, res) => {
       }));
     });
     
-    // ✅ ДОДАЄМО до існуючих значень (а не перезаписуємо)
-    await addQuantitiesToInventorySheet(sheetName, inventoryByFridge);
+    // ✅ ПЕРЕЗАПИСУЄМО значення (користувач сам додає через +)
+    await writeQuantitiesToInventorySheet(sheetName, inventoryByFridge);
     
     res.json({ 
       success: true, 

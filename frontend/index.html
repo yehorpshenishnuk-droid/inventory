@@ -748,6 +748,8 @@
 
     // Показати продукти холодильника
     async function showProducts(fridge) {
+      console.log("📂 Відкриваю холодильник:", fridge.fridgeNumber);
+      
       // Перевіряємо блокування
       const lock = await checkLocationLock(fridge.fridgeNumber);
       
@@ -764,55 +766,63 @@
       }
       
       // 🔄 ЗАВАНТАЖУЄМО СВІЖІ ДАНІ З СЕРВЕРА
+      console.log("🔄 Завантажую свіжі дані для дати:", inventoryDate);
+      
       try {
         const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
         const result = await response.json();
         
+        console.log("📦 Отримано відповідь:", result);
+        
         if (result.data) {
-          // Оновлюємо дані для всіх холодильників
-          result.data.forEach(fridgeData => {
-            const fridgeNum = fridgeData.fridgeNumber;
+          // Знаходимо цей конкретний холодильник в свіжих даних
+          const freshFridgeData = result.data.find(f => f.fridgeNumber === fridge.fridgeNumber);
+          
+          console.log("🎯 Свіжі дані для холодильника", fridge.fridgeNumber, ":", freshFridgeData);
+          
+          if (freshFridgeData && freshFridgeData.products) {
+            // Оновлюємо fridge об'єкт свіжими даними
+            fridge.products = freshFridgeData.products;
             
-            // Зберігаємо savedQuantity з сервера для кожного продукту
-            fridgeData.products.forEach(serverProduct => {
-              // Знаходимо цей холодильник в наших даних
-              const localFridge = allFridges.find(f => f.fridgeNumber === fridgeNum);
-              if (localFridge) {
-                const localProduct = localFridge.products.find(p => p.name === serverProduct.name);
-                if (localProduct) {
-                  // Оновлюємо savedQuantity з сервера
-                  localProduct.savedQuantity = serverProduct.savedQuantity || serverProduct.currentQuantity || "";
-                }
+            // Також оновлюємо в allFridges
+            const index = allFridges.findIndex(f => f.fridgeNumber === fridge.fridgeNumber);
+            if (index >= 0) {
+              allFridges[index].products = freshFridgeData.products;
+            }
+            
+            // Оновлюємо inventoryData з збереженими даними
+            const productsWithData = freshFridgeData.products.filter(p => p.savedQuantity && p.savedQuantity !== "");
+            
+            console.log("💾 Продукти зі збереженими даними:", productsWithData);
+            
+            if (productsWithData.length > 0) {
+              if (!inventoryData[fridge.fridgeNumber]) {
+                inventoryData[fridge.fridgeNumber] = [];
               }
               
-              // Оновлюємо inventoryData якщо є дані з сервера і немає локальних
-              if (serverProduct.savedQuantity && (!inventoryData[fridgeNum] || !inventoryData[fridgeNum].find(p => p.name === serverProduct.name))) {
-                if (!inventoryData[fridgeNum]) {
-                  inventoryData[fridgeNum] = [];
-                }
+              productsWithData.forEach(serverProduct => {
+                const existingIndex = inventoryData[fridge.fridgeNumber].findIndex(p => p.name === serverProduct.name);
                 
-                // Перевіряємо чи вже є цей продукт
-                const existingIndex = inventoryData[fridgeNum].findIndex(p => p.name === serverProduct.name);
                 if (existingIndex >= 0) {
-                  // Оновлюємо тільки якщо немає локальних змін
-                  if (!inventoryData[fridgeNum][existingIndex].quantity) {
-                    inventoryData[fridgeNum][existingIndex].quantity = serverProduct.savedQuantity;
-                  }
+                  // Якщо вже є - оновлюємо
+                  inventoryData[fridge.fridgeNumber][existingIndex].quantity = serverProduct.savedQuantity;
+                  console.log("♻️ Оновлено:", serverProduct.name, "=", serverProduct.savedQuantity);
                 } else {
                   // Додаємо новий
-                  inventoryData[fridgeNum].push({
+                  inventoryData[fridge.fridgeNumber].push({
                     name: serverProduct.name,
                     quantity: serverProduct.savedQuantity
                   });
+                  console.log("➕ Додано:", serverProduct.name, "=", serverProduct.savedQuantity);
                 }
-              }
-            });
-          });
+              });
+            }
+          }
           
-          console.log("🔄 Оновлено дані з сервера");
+          console.log("✅ Оновлено дані для холодильника", fridge.fridgeNumber);
         }
       } catch (error) {
-        console.error("⚠️ Помилка завантаження свіжих даних:", error);
+        console.error("❌ Помилка завантаження свіжих даних:", error);
         // Продовжуємо роботу навіть якщо не вдалося оновити
       }
       
@@ -829,6 +839,8 @@
       container.innerHTML = "";
       
       const savedData = inventoryData[fridge.fridgeNumber] || [];
+      
+      console.log("📋 Відображаю продукти з даними:", savedData);
       
       fridge.products.forEach((product) => {
         const savedProduct = savedData.find(p => p.name === product.name);

@@ -25,6 +25,7 @@ export { sheets, SPREADSHEET_ID };
 // === БЛОКУВАННЯ ХОЛОДИЛЬНИКІВ ===
 
 const LOCKS_SHEET_NAME = "Блокування";
+const INVENTORY_OWNERS_SHEET = "Головні інвентаризацій"; // Хто розпочав інвентаризацію
 
 // Перевірка чи існує аркуш "Блокування", якщо ні - створити
 async function ensureLocksSheetExists() {
@@ -238,6 +239,228 @@ export async function getAllLocks() {
   } catch (error) {
     console.error("❌ Помилка отримання блокувань:", error);
     return {};
+  }
+}
+
+// === ГЛОБАЛЬНЕ БЛОКУВАННЯ ІНВЕНТАРИЗАЦІЇ ===
+
+// Перевірка чи існує аркуш "Головні інвентаризацій"
+async function ensureInventoryOwnersSheetExists() {
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const ownersSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === INVENTORY_OWNERS_SHEET
+    );
+    
+    if (!ownersSheet) {
+      // Створюємо аркуш
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: INVENTORY_OWNERS_SHEET
+              }
+            }
+          }]
+        }
+      });
+      
+      // Додаємо заголовки
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${INVENTORY_OWNERS_SHEET}!A1:C1`,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [["Дата інвентаризації", "Головний (ім'я)", "Час початку"]]
+        }
+      });
+      
+      console.log("✅ Створено аркуш 'Головні інвентаризацій'");
+    }
+  } catch (error) {
+    console.error("❌ Помилка створення аркуша головних:", error);
+  }
+}
+
+// Встановити головного для інвентаризації
+export async function setInventoryOwner(date, userName) {
+  try {
+    await ensureInventoryOwnersSheetExists();
+    
+    // Перевіряємо чи вже є головний для цієї дати
+    const existingOwner = await getInventoryOwner(date);
+    if (existingOwner) {
+      console.log(`ℹ️ Головний вже призначений: ${existingOwner.userName}`);
+      return { 
+        success: false, 
+        isOwner: false,
+        owner: existingOwner.userName
+      };
+    }
+    
+    const now = new Date();
+    const time = now.toLocaleTimeString('uk-UA');
+    
+    // Додаємо новий запис
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${INVENTORY_OWNERS_SHEET}!A:C`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[date, userName, time]]
+      }
+    });
+    
+    console.log(`👑 Головний інвентаризації ${date}: ${userName}`);
+    return { success: true, isOwner: true };
+  } catch (error) {
+    console.error("❌ Помилка встановлення головного:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Отримати головного для інвентаризації
+export async function getInventoryOwner(date) {
+  try {
+    await ensureInventoryOwnersSheetExists();
+    
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${INVENTORY_OWNERS_SHEET}!A2:C`
+    });
+    
+    const rows = response.data.values || [];
+    
+    for (const row of rows) {
+      if (row[0] === date) {
+        return {
+          date: row[0],
+          userName: row[1],
+          time: row[2]
+        };
+      }
+    }
+    
+    return null; // Немає головного
+  } catch (error) {
+    console.error("❌ Помилка отримання головного:", error);
+    return null;
+  }
+}
+
+// Видалити головного (після завершення інвентаризації)
+export async function clearInventoryOwner(date) {
+  try {
+    await ensureInventoryOwnersSheetExists();
+    
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${INVENTORY_OWNERS_SHEET}!A2:C`
+    });
+    
+    const rows = response.data.values || [];
+    let rowToDelete = -1;
+    
+    rows.forEach((row, index) => {
+      if (row[0] === date) {
+        rowToDelete = index + 2; // +2 бо рахуємо з заголовка
+      }
+    });
+    
+    if (rowToDelete > 0) {
+      const sheetId = (await sheets.spreadsheets.get({
+        spreadsheetId: SPREADSHEET_ID
+      })).data.sheets.find(s => s.properties.title === INVENTORY_OWNERS_SHEET)?.properties?.sheetId;
+      
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            deleteDimension: {
+              range: {
+                sheetId: sheetId,
+                dimension: "ROWS",
+                startIndex: rowToDelete - 1,
+                endIndex: rowToDelete
+              }
+            }
+          }]
+        }
+      });
+      
+      console.log(`🔓 Знято головного для інвентаризації: ${date}`);
+      return { success: true };
+    }
+    
+    return { success: true, message: "Не було головного" };
+  } catch (error) {
+    console.error("❌ Помилка зняття головного:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Заблокувати всю інвентаризацію (при натисканні "Провести інвентаризацію")
+export async function lockInventory(date, userName) {
+  try {
+    await ensureLocksSheetExists();
+    
+    const lockKey = `INVENTORY_${date}`;
+    
+    // Перевіряємо чи не заблокована вже
+    const existingLock = await checkInventoryLock(date);
+    if (existingLock) {
+      return { 
+        success: false, 
+        error: `Інвентаризацію вже проводить ${existingLock.userName}` 
+      };
+    }
+    
+    const now = new Date();
+    const time = now.toLocaleTimeString('uk-UA');
+    const dateStr = now.toLocaleDateString('uk-UA');
+    
+    // Додаємо запис
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A:D`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[lockKey, userName, time, dateStr]]
+      }
+    });
+    
+    console.log(`🔒 Заблоковано інвентаризацію ${date} → ${userName}`);
+    return { success: true };
+  } catch (error) {
+    console.error("❌ Помилка блокування інвентаризації:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Розблокувати інвентаризацію
+export async function unlockInventory(date) {
+  try {
+    const lockKey = `INVENTORY_${date}`;
+    return await unlockLocation(lockKey);
+  } catch (error) {
+    console.error("❌ Помилка розблокування інвентаризації:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Перевірити чи заблокована інвентаризація
+export async function checkInventoryLock(date) {
+  try {
+    const lockKey = `INVENTORY_${date}`;
+    return await checkLock(lockKey);
+  } catch (error) {
+    console.error("❌ Помилка перевірки блокування інвентаризації:", error);
+    return null;
   }
 }
 

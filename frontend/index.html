@@ -482,7 +482,6 @@
     <div id="product-list">
       <div class="top-buttons">
         <button class="back-btn" onclick="showFridgeSelector()">← Назад</button>
-        <button class="save-now-btn" onclick="syncToGoogleSheets()">🔄 Синхронізація</button>
       </div>
       <h2 id="current-fridge-title"></h2>
       
@@ -575,6 +574,43 @@
 
     // Початок інвентаризації
     // === ФУНКЦІЇ БЛОКУВАННЯ ===
+    
+    let pendingFridgeToUnlock = null; // Зберігаємо холодильник для розблокування
+    
+    // Показати модальне вікно блокування
+    function showLockModal(fridge, lock) {
+      pendingFridgeToUnlock = fridge;
+      
+      const lockedInfo = document.getElementById("locked-info");
+      lockedInfo.innerHTML = `
+        <strong>${lock.userName}</strong> зараз працює з <strong>${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}</strong><br>
+        <span style="color: #999; font-size: 0.9em;">Почав о ${lock.time}</span>
+      `;
+      
+      document.getElementById("locked-modal").classList.add("active");
+    }
+    
+    // Закрити модальне вікно
+    function closeLockModal() {
+      document.getElementById("locked-modal").classList.remove("active");
+      pendingFridgeToUnlock = null;
+    }
+    
+    // Примусово розблокувати і відкрити
+    async function forceUnlockAndOpen() {
+      if (!pendingFridgeToUnlock) return;
+      
+      console.log(`🔓 Примусове розблокування: ${pendingFridgeToUnlock.fridgeNumber}`);
+      
+      // Розблокувати
+      await unlockLocation(pendingFridgeToUnlock.fridgeNumber);
+      
+      // Закрити модальне вікно
+      closeLockModal();
+      
+      // Відкрити холодильник
+      await showProducts(pendingFridgeToUnlock);
+    }
     
     // Перевірити чи заблокований холодильник/стелаж
     async function checkLocationLock(locationNumber) {
@@ -775,14 +811,15 @@
       const lock = await checkLocationLock(fridge.fridgeNumber);
       
       if (lock && lock.userName !== currentUserName) {
-        alert(`❌ ${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber} зараз рахує: ${lock.userName}\n\nПочав о ${lock.time}\n\nЗачекайте поки ${lock.userName} завершить роботу.`);
+        // Показуємо гарне модальне вікно
+        showLockModal(fridge, lock);
         return;
       }
       
       // Блокуємо холодильник
       const lockResult = await lockLocation(fridge.fridgeNumber);
       if (!lockResult.success && lockResult.error) {
-        alert(`❌ Помилка блокування: ${lockResult.error}`);
+        alert(`❌ Помилка блокування: ${lockResult.error}\n\nСпробуйте ще раз або зачекайте хвилину.`);
         return;
       }
       
@@ -1416,5 +1453,27 @@
       }
     });
   </script>
+  <!-- Модальне вікно: Холодильник заблокований -->
+  <div id="locked-modal" class="modal">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+      <h2 style="color: #f59e0b; margin-bottom: 10px;">🫣 Упс... тут хтось вже вносить дані</h2>
+      <p id="locked-info" style="font-size: 1.1em; color: #666; margin-bottom: 25px;"></p>
+      <button 
+        onclick="forceUnlockAndOpen()" 
+        class="save-btn"
+        style="width: 100%; font-size: 1.2em; padding: 15px;">
+        🔓 Відкрити
+      </button>
+      <button 
+        onclick="closeLockModal()" 
+        style="margin-top: 10px; background: #6b7280; color: white; border: none; 
+               padding: 12px 25px; border-radius: 10px; cursor: pointer; width: 100%;"
+        onmouseover="this.style.background='#4b5563'" 
+        onmouseout="this.style.background='#6b7280'">
+        Назад
+      </button>
+    </div>
+  </div>
+
 </body>
 </html>

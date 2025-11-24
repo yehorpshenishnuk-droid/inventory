@@ -1021,14 +1021,16 @@
     }
 
     // Зберегти дані поточного холодильника
-    function saveCurrentFridge() {
+    async function saveCurrentFridge() {
       const inputs = document.querySelectorAll("#products-container input");
       const products = [];
       
       inputs.forEach(input => {
+        const productName = input.getAttribute("data-product-name");
         const quantity = input.value;
+        
         products.push({
-          name: input.getAttribute("data-product-name"),
+          name: productName,
           quantity: quantity
         });
       });
@@ -1037,11 +1039,55 @@
       hasUnsavedChanges = false;
       saveDraft();
       
+      // ✅ ЗБЕРІГАЄМО В GOOGLE SHEETS (перезапис)
+      await saveToGoogleSheetsSync();
+      
       showMessage("✅ Дані збережено! Можете перейти до наступного холодильника.", "success");
       
       setTimeout(() => {
         showFridgeSelector();
       }, 1500);
+    }
+    
+    // Синхронізація поточного холодильника з Google Sheets
+    async function saveToGoogleSheetsSync() {
+      try {
+        const fridgeArray = [{
+          fridgeNumber: currentFridge.fridgeNumber,
+          products: inventoryData[currentFridge.fridgeNumber]
+            .filter(p => p.quantity !== "")
+            .map(p => ({
+              name: p.name,
+              quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
+            }))
+        }];
+        
+        if (fridgeArray[0].products.length === 0) {
+          console.log("ℹ️ Немає даних для збереження");
+          return;
+        }
+        
+        console.log("💾 Зберігаю в Google Sheets:", fridgeArray);
+        
+        const response = await fetch(`${API_URL}/api/inventory/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            inventoryData: fridgeArray,
+            inventoryDate: inventoryDate
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          console.log("✅ Збережено в Google Sheets");
+        } else {
+          console.error("❌ Помилка збереження:", result.error);
+        }
+      } catch (error) {
+        console.error("❌ Помилка збереження:", error);
+      }
     }
 
     // Синхронізація з Google Sheets (без закриття інвентаризації)
@@ -1263,10 +1309,10 @@
     
     function startAutosave() {
       autosaveInterval = setInterval(() => {
-        saveDraft();
-        saveToGoogleSheets(); // ✅ АВТОЗБЕРЕЖЕННЯ В GOOGLE SHEETS
+        saveDraft(); // ✅ Тільки localStorage
+        // saveToGoogleSheets(); - ВИМКНЕНО! Зберігаємо тільки при натисканні кнопки
         showAutosaveIndicator();
-      }, 10000); // Кожні 10 секунд (щоб не перевантажувати API)
+      }, 10000); // Кожні 10 секунд
     }
 
     function stopAutosave() {

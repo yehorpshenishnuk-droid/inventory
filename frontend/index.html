@@ -481,7 +481,7 @@
     <!-- Екран списку продуктів -->
     <div id="product-list">
       <div class="top-buttons">
-        <button class="back-btn" onclick="showFridgeSelector()">← Назад</button>
+        <button class="back-btn" onclick="saveCurrentFridge()">← Назад</button>
       </div>
       <h2 id="current-fridge-title"></h2>
       
@@ -763,12 +763,11 @@
       const selector = document.getElementById("fridge-selector");
       selector.innerHTML = "";
       
-      // Отримуємо всі блокування
-      const locks = await getAllLocationLocks();
-      
+      // ✅ Рендеримо спочатку БЕЗ перевірки блокувань (швидко)
       allFridges.forEach(fridge => {
         const card = document.createElement("div");
         card.className = "fridge-card";
+        card.setAttribute("data-fridge", fridge.fridgeNumber);
         
         const hasData = inventoryData[fridge.fridgeNumber] && 
                         inventoryData[fridge.fridgeNumber].some(p => p.quantity !== "");
@@ -777,16 +776,12 @@
           card.classList.add("selected");
         }
         
-        // Перевіряємо чи заблокований
-        const lock = locks[fridge.fridgeNumber];
-        const isLockedByOther = lock && lock.userName !== currentUserName;
-        
         card.innerHTML = `
           <div class="fridge-icon">${getFridgeIcon(fridge.fridgeNumber)}</div>
           <div class="fridge-number">${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}</div>
           <div class="fridge-count">${fridge.products.length} позицій</div>
           ${hasData ? '<div style="margin-top: 10px;">✅ Заповнено</div>' : ''}
-          ${isLockedByOther ? `<div style="margin-top: 10px; color: #ef4444;">🔒 Рахує: ${lock.userName}</div>` : ''}
+          <div class="lock-status"></div>
         `;
         
         card.onclick = () => showProducts(fridge);
@@ -801,11 +796,25 @@
         saveAllBtn.onclick = checkAndSaveAll;
         selector.appendChild(saveAllBtn);
       }
+      
+      // ⚡ Завантажуємо блокування АСИНХРОННО (не блокує UI)
+      getAllLocationLocks().then(locks => {
+        allFridges.forEach(fridge => {
+          const lock = locks[fridge.fridgeNumber];
+          const isLockedByOther = lock && lock.userName !== currentUserName;
+          
+          if (isLockedByOther) {
+            const card = selector.querySelector(`[data-fridge="${fridge.fridgeNumber}"]`);
+            if (card) {
+              const lockStatus = card.querySelector('.lock-status');
+              lockStatus.innerHTML = `<div style="margin-top: 10px; color: #ef4444;">🔒 Рахує: ${lock.userName}</div>`;
+            }
+          }
+        });
+      });
     }
 
-    // Показати продукти холодильника
-    async function showProducts(fridge) {
-      console.log("📂 Відкриваю холодильник:", fridge.fridgeNumber);
+Відкриваю холодильник:", fridge.fridgeNumber);
       
       // Перевіряємо блокування
       const lock = await checkLocationLock(fridge.fridgeNumber);
@@ -823,66 +832,7 @@
         return;
       }
       
-      // 🔄 ЗАВАНТАЖУЄМО СВІЖІ ДАНІ З СЕРВЕРА
-      console.log("🔄 Завантажую свіжі дані для дати:", inventoryDate);
-      
-      try {
-        const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
-        const result = await response.json();
-        
-        console.log("📦 Отримано відповідь:", result);
-        
-        if (result.data) {
-          // Знаходимо цей конкретний холодильник в свіжих даних
-          const freshFridgeData = result.data.find(f => f.fridgeNumber === fridge.fridgeNumber);
-          
-          console.log("🎯 Свіжі дані для холодильника", fridge.fridgeNumber, ":", freshFridgeData);
-          
-          if (freshFridgeData && freshFridgeData.products) {
-            // Оновлюємо fridge об'єкт свіжими даними
-            fridge.products = freshFridgeData.products;
-            
-            // Також оновлюємо в allFridges
-            const index = allFridges.findIndex(f => f.fridgeNumber === fridge.fridgeNumber);
-            if (index >= 0) {
-              allFridges[index].products = freshFridgeData.products;
-            }
-            
-            // Оновлюємо inventoryData з збереженими даними
-            const productsWithData = freshFridgeData.products.filter(p => p.savedQuantity && p.savedQuantity !== "");
-            
-            console.log("💾 Продукти зі збереженими даними:", productsWithData);
-            
-            if (productsWithData.length > 0) {
-              if (!inventoryData[fridge.fridgeNumber]) {
-                inventoryData[fridge.fridgeNumber] = [];
-              }
-              
-              productsWithData.forEach(serverProduct => {
-                const existingIndex = inventoryData[fridge.fridgeNumber].findIndex(p => p.name === serverProduct.name);
-                
-                if (existingIndex >= 0) {
-                  // Якщо вже є - оновлюємо
-                  inventoryData[fridge.fridgeNumber][existingIndex].quantity = serverProduct.savedQuantity;
-                  console.log("♻️ Оновлено:", serverProduct.name, "=", serverProduct.savedQuantity);
-                } else {
-                  // Додаємо новий
-                  inventoryData[fridge.fridgeNumber].push({
-                    name: serverProduct.name,
-                    quantity: serverProduct.savedQuantity
-                  });
-                  console.log("➕ Додано:", serverProduct.name, "=", serverProduct.savedQuantity);
-                }
-              });
-            }
-          }
-          
-          console.log("✅ Оновлено дані для холодильника", fridge.fridgeNumber);
-        }
-      } catch (error) {
-        console.error("❌ Помилка завантаження свіжих даних:", error);
-        // Продовжуємо роботу навіть якщо не вдалося оновити
-      }
+      // ✅ Використовуємо вже завантажені дані (НЕ перезавантажуємо з сервера)
       
       currentFridge = fridge;
       currentProducts = fridge.products;

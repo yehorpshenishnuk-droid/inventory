@@ -1,258 +1,215 @@
-import fs from "fs";
 import { google } from "googleapis";
 
-// =========================
-//   1. Авторизация
-// =========================
-
-const CREDENTIALS_PATH = "/etc/secrets/credentials.json";
-
-const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
-
+// ------------------------------
+// Google Auth
+// ------------------------------
 const auth = new google.auth.GoogleAuth({
-  credentials,
+  credentials: JSON.parse(process.env.GOOGLE_SERVICE_KEY),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
-const sheets = google.sheets({ version: "v4", auth });
+export const sheets = google.sheets({ version: "v4", auth });
+export const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-const SPREADSHEET_ID = "1eiJw3ADAdq6GfQxsbJp0STDsc1MyJfPXCf2caQy8khw";
-const MASTER_SHEET_NAME = "Лист1";
-
-export { sheets, SPREADSHEET_ID };
-
-// =========================
-//   2. Чтение продуктов
-// =========================
-
-export async function readProductsFromSheet() {
+// -----------------------------------------------------------
+// 1. Запись всех продуктов / позиций в шаблон Лист1
+// -----------------------------------------------------------
+export async function writeProductsToSheet(products) {
   try {
-    const response = await sheets.spreadsheets.values.get({
+    const header = [
+      "Холодильник",
+      "Стелаж",
+      "Назва",
+      "Категорія",
+      "Тип",
+      "Одиниці виміру",
+    ];
+
+    const rows = products.map((p) => [
+      "", // fridge
+      "", // shelf
+      p.name || p.product_name || "",
+      p.category || p.category_name || "",
+      p.type || "",
+      p.unit || "кг",
+    ]);
+
+    await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A2:F`,
-    });
-
-    const rows = response.data.values || [];
-    const products = [];
-
-    rows.forEach((row, idx) => {
-      const fridge = row[0] || "";
-      const shelf = row[1] || "";
-      const name = row[2] || "";
-      const category = row[3] || "";
-      const type = row[4] || "";
-      const unit = row[5] || "кг";
-
-      const locs = [];
-
-      if (fridge)
-        fridge.includes(",")
-          ? locs.push(...fridge.split(",").map(s => s.trim()))
-          : locs.push(fridge);
-
-      if (shelf)
-        shelf.includes(",")
-          ? locs.push(...shelf.split(",").map(s => s.trim()))
-          : locs.push(shelf);
-
-      locs.forEach(loc => {
-        products.push({
-          rowIndex: idx + 2,
-          fridge: loc,
-          name,
-          category,
-          type,
-          unit,
-          quantity: ""
-        });
-      });
-    });
-
-    return products;
-  } catch (err) {
-    console.error("Ошибка чтения таблицы:", err);
-    return [];
-  }
-}
-
-// =========================
-//   3. Проверка наличия листа
-// =========================
-
-export async function checkInventorySheetExists(date) {
-  try {
-    const sheetName = `Інвентаризація ${date}`;
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
-    });
-
-    return spreadsheet.data.sheets.some(
-      (s) => s.properties.title === sheetName
-    );
-  } catch {
-    return false;
-  }
-}
-
-// =========================
-//   4. Создание листа инвентаризации
-// =========================
-
-export async function createInventorySheet(date) {
-  const sheetName = `Інвентаризація ${date}`;
-
-  try {
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
-    });
-
-    const exists = spreadsheet.data.sheets.some(
-      (s) => s.properties.title === sheetName
-    );
-
-    if (exists) return sheetName;
-
-    const master = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A1:Z`,
-    });
-
-    const rows = master.data.values || [];
-    const filtered = [];
-
-    rows.forEach((row, idx) => {
-      if (idx === 0) {
-        filtered.push(row);
-        return;
-      }
-
-      const hasLoc =
-        (row[0] && row[0].trim()) ||
-        (row[1] && row[1].trim());
-
-      if (hasLoc) filtered.push(row);
-    });
-
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: sheetName } } }],
-      },
+      range: `Лист1!A1:F1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [header] },
     });
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A1`,
+      range: `Лист1!A2:F`,
       valueInputOption: "RAW",
-      requestBody: { values: filtered },
+      requestBody: { values: rows },
     });
 
-    return sheetName;
+    return true;
   } catch (err) {
-    console.error("Ошибка создания листа:", err);
+    console.error("Ошибка записи продуктов:", err);
     throw err;
   }
 }
 
-// =========================
-//   5. Чтение готового листа инвентаризации
-// =========================
+// -----------------------------------------------------------
+// 2. Чтение Лист1 для загрузки данных в инвентаризацию
+// -----------------------------------------------------------
+export async function readProductsFromSheet() {
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Лист1!A2:F`,
+    });
 
+    const rows = res.data.values || [];
+
+    return rows.map((row, idx) => ({
+      fridge: row[0] || "",
+      shelf: row[1] || "",
+      name: row[2] || "",
+      category: row[3] || "",
+      type: row[4] || "",
+      unit: row[5] || "",
+      quantity: "",
+      rowIndex: idx + 2,
+    }));
+  } catch (err) {
+    console.error("Ошибка чтения Лист1:", err);
+    throw err;
+  }
+}
+
+// -----------------------------------------------------------
+// 3. Проверка существования листа "Інвентаризація YYYY-MM-DD"
+// -----------------------------------------------------------
+export async function checkInventorySheetExists(date) {
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID,
+    });
+
+    const name = `Інвентаризація ${date}`;
+
+    return spreadsheet.data.sheets.some(
+      (s) => s.properties.title === name
+    );
+  } catch (err) {
+    console.error("Ошибка проверки листа:", err);
+    return false;
+  }
+}
+
+// -----------------------------------------------------------
+// 4. Создание нового листа инвентаризации
+// -----------------------------------------------------------
+export async function createInventorySheet(date) {
+  const sheetName = `Інвентаризація ${date}`;
+
+  const templateRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `Лист1!A1:F`,
+  });
+
+  const header = templateRes.data.values?.[0] || [];
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [
+        { addSheet: { properties: { title: sheetName } } },
+      ],
+    },
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${sheetName}!A1:F1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [header] },
+  });
+
+  return sheetName;
+}
+
+// -----------------------------------------------------------
+// 5. Чтение листа инвентаризации
+// -----------------------------------------------------------
 export async function readInventorySheetData(date) {
   try {
     const sheetName = `Інвентаризація ${date}`;
 
-    const headerRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A1:Z1`,
-    });
-
-    const headers = headerRes.data.values?.[0] || [];
-
-    // поиск колонок холодильников вида "Холодильник 1"
-    const locCols = {};
-
-    headers.forEach((h, idx) => {
-      const m1 = h.match(/Холодильник\s+(\d+)/i);
-      const m2 = h.match(/Стелаж\s+(\d+)/i);
-
-      if (m1) locCols[m1[1]] = idx;
-      if (m2) locCols[m2[1]] = idx;
-    });
-
-    const dataRes = await sheets.spreadsheets.values.get({
+    const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2:Z`,
     });
 
-    const rows = dataRes.data.values || [];
-    const items = [];
+    const rows = res.data.values || [];
 
-    rows.forEach((row, rIdx) => {
-      const fridge = row[0] || "";
-      const shelf = row[1] || "";
-      const name = row[2] || "";
-      const category = row[3] || "";
-      const type = row[4] || "";
-      const unit = row[5] || "кг";
-
-      const locs = [];
-
-      if (fridge)
-        fridge.includes(",")
-          ? locs.push(...fridge.split(",").map(s => s.trim()))
-          : locs.push(fridge);
-
-      if (shelf)
-        shelf.includes(",")
-          ? locs.push(...shelf.split(",").map(s => s.trim()))
-          : locs.push(shelf);
-
-      locs.forEach(loc => {
-        const colIndex = locCols[loc];
-        const qty = colIndex !== undefined ? row[colIndex] || "" : "";
-
-        items.push({
-          rowIndex: rIdx + 2,
-          fridge: loc,
-          name,
-          category,
-          type,
-          unit,
-          quantity: qty
-        });
-      });
-    });
-
-    return items;
+    return rows.map((row, idx) => ({
+      fridge: row[0] || "",
+      shelf: row[1] || "",
+      name: row[2] || "",
+      category: row[3] || "",
+      type: row[4] || "",
+      unit: row[5] || "",
+      quantity: row[row.length - 1] || "",
+      rowIndex: idx + 2,
+    }));
   } catch (err) {
     console.error("Ошибка чтения инвентаризации:", err);
-    return null;
+    throw err;
   }
 }
 
-// =========================
-//   6. Запись остатков в лист
-// =========================
-
-export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFridge) {
+// -----------------------------------------------------------
+// 6. Запись остатков в холодильники + сумма "Залишки"
+// -----------------------------------------------------------
+export async function writeQuantitiesToInventorySheet(
+  sheetName,
+  inventoryByFridge
+) {
   try {
+    // --- 1. Получаем заголовки ---
     const headerRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1:Z1`,
     });
 
     const headers = headerRes.data.values?.[0] || [];
-    const locCols = {};
 
+    const locCols = {}; // { "1": 6, "2": 7, ... }
+    let totalColumnIndex = null;
+
+    // Парсим заголовки
     headers.forEach((h, idx) => {
-      const m1 = h.match(/Холодильник\s+(\d+)/i);
-      const m2 = h.match(/Стелаж\s+(\d+)/i);
+      const match = h.match(/(Холодильник|Стелаж)\s+(\d+)/i);
+      if (match) {
+        const num = match[2];
+        locCols[num] = idx;
+      }
 
-      if (m1) locCols[m1[1]] = String.fromCharCode(65 + idx);
-      if (m2) locCols[m2[1]] = String.fromCharCode(65 + idx);
+      if (h.toLowerCase().includes("залишки")) {
+        totalColumnIndex = idx;
+      }
     });
 
+    // Если нет колонки “Залишки”, создаём
+    if (totalColumnIndex === null) {
+      totalColumnIndex = headers.length;
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${sheetName}!${String.fromCharCode(65 + totalColumnIndex)}1`,
+        valueInputOption: "RAW",
+        requestBody: { values: [["Залишки"]] },
+      });
+    }
+
+    // --- 2. Получаем строки с данными ---
     const dataRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2:Z`,
@@ -262,74 +219,63 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
 
     const batch = [];
 
+    // --- 3. Запись значений ---
     rows.forEach((row, idx) => {
-      const name = row[2];
+      const productName = row[2];
       const rowIndex = idx + 2;
 
-      let sum = 0;
+      let total = 0;
+      let hasAnyValue = false;
 
-      for (const fridgeNum of Object.keys(inventoryByFridge)) {
-        const col = locCols[fridgeNum];
-        if (!col) continue;
+      // Перебор всех холодильников/стеллажей, существующих в таблице
+      for (const fridgeNum of Object.keys(locCols)) {
+        const colIndex = locCols[fridgeNum];
 
-        const value = inventoryByFridge[fridgeNum].find(p => p.name === name)?.quantity;
+        const quantity =
+          inventoryByFridge[fridgeNum]?.find(
+            (p) => p.name === productName
+          )?.quantity ?? "";
 
-        if (value !== undefined && value !== "") {
+        // Если фронт прислал значение — пишем его
+        if (quantity !== "") {
           batch.push({
-            range: `${sheetName}!${col}${rowIndex}`,
-            values: [[value]],
+            range: `${sheetName}!${String.fromCharCode(
+              65 + colIndex
+            )}${rowIndex}`,
+            values: [[quantity]],
           });
-          const x = parseFloat(value) || 0;
-          sum += x;
+
+          const num = parseFloat(quantity);
+          if (!isNaN(num)) {
+            total += num;
+            hasAnyValue = true;
+          }
         }
       }
+
+      // Записываем сумму — только если есть хоть одно число
+      batch.push({
+        range: `${sheetName}!${String.fromCharCode(
+          65 + totalColumnIndex
+        )}${rowIndex}`,
+        values: [[hasAnyValue ? total : ""]],
+      });
     });
 
-    if (!batch.length) return;
+    // --- 4. batch update ---
+    if (batch.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: batch,
+        },
+      });
+    }
 
-    await sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        valueInputOption: "RAW",
-        data: batch,
-      },
-    });
+    return true;
   } catch (err) {
     console.error("Ошибка записи остатков:", err);
     throw err;
   }
-}
-
-// =========================
-//   7. Старый метод (оставляем)
-// =========================
-
-export async function writeProductsToSheet(products) {
-  const hasType = products.length > 0 && products[0].hasOwnProperty("type");
-
-  const headers = hasType
-    ? [["Назва", "Категорія", "Тип"]]
-    : [["Назва", "Категорія"]];
-
-  const values = products.map((p) =>
-    hasType
-      ? [p.name, p.category, p.type]
-      : [p.name, p.category]
-  );
-
-  const headerRange = hasType ? "A1:C1" : "A1:B1";
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: headerRange,
-    valueInputOption: "RAW",
-    requestBody: { values: headers },
-  });
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: "A2",
-    valueInputOption: "RAW",
-    requestBody: { values },
-  });
 }

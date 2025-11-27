@@ -13,7 +13,8 @@ import {
 
 import {
   getPosterProducts,
-  getAllPosterItems
+  getAllPosterItems,
+  getPosterPrepacks
 } from "./poster.js";
 
 import LockManager from "./lockManager.js";
@@ -86,6 +87,90 @@ app.get("/api/upload-all-to-sheets", async (req, res) => {
 
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// =====================================================
+// ВЫГРУЗКА ПОЛУФАБРИКАТОВ С ID
+// =====================================================
+
+app.get("/api/upload-prepacks-to-sheets", async (req, res) => {
+  try {
+    const prepacks = await getPosterPrepacks();
+    
+    if (!prepacks || prepacks.length === 0) {
+      return res.json({ 
+        success: false, 
+        message: "Не удалось получить полуфабрикаты из Poster" 
+      });
+    }
+    
+    const PREPACKS_SHEET = "Напівфабрикати";
+    
+    // Проверяем существует ли лист
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const sheetExists = spreadsheet.data.sheets.find(
+      s => s.properties.title === PREPACKS_SHEET
+    );
+    
+    // Если листа нет - создаем
+    if (!sheetExists) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: PREPACKS_SHEET
+              }
+            }
+          }]
+        }
+      });
+      console.log(`✅ Створено новий аркуш: ${PREPACKS_SHEET}`);
+    }
+    
+    // Записываем заголовки
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${PREPACKS_SHEET}!A1:C1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["ID", "Назва", "Тип"]]
+      }
+    });
+    
+    // Записываем данные
+    const values = prepacks.map(p => [
+      p.product_id, 
+      p.product_name, 
+      "Напівфабрикат"
+    ]);
+    
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${PREPACKS_SHEET}!A2`,
+      valueInputOption: "RAW",
+      requestBody: { values }
+    });
+    
+    console.log(`✅ Виведено ${prepacks.length} напівфабрикатів з ID`);
+    
+    res.json({ 
+      success: true, 
+      message: `✅ Напівфабрикати (${prepacks.length} шт.) з ID успішно виведені!`,
+      count: prepacks.length,
+      sheetName: PREPACKS_SHEET
+    });
+  } catch (err) {
+    console.error("Ошибка при выгрузке полуфабрикатов:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message 
+    });
   }
 });
 
@@ -299,7 +384,28 @@ app.get("/api/locks/all", (req, res) => {
 // =====================================================
 
 app.get("/", (req, res) => {
-  res.send("Сервер работает ✔");
+  res.send(`
+    ✅ Сервер працює!<br><br>
+    <strong>Доступні endpoints:</strong><br><br>
+    📦 <strong>Poster API:</strong><br>
+    - GET /api/products - отримати продукти з Poster<br><br>
+    
+    📤 <strong>Виведення в Google Sheets:</strong><br>
+    - GET /api/upload-to-sheets - завантажити продукти<br>
+    - GET /api/upload-all-to-sheets - завантажити всі позиції<br>
+    - GET /api/upload-prepacks-to-sheets - 🆕 <strong>завантажити НАПІВФАБРИКАТИ з ID</strong><br><br>
+    
+    📋 <strong>Інвентаризація:</strong><br>
+    - GET /api/inventory/products - отримати продукти для інвентаризації<br>
+    - POST /api/inventory/save - зберегти залишки<br>
+    - GET /api/inventory/export-pdf/:sheetName - експорт в PDF<br><br>
+    
+    🔒 <strong>Блокування:</strong><br>
+    - POST /api/locks/lock - заблокувати локацію<br>
+    - DELETE /api/locks/unlock/:locationNumber - розблокувати<br>
+    - GET /api/locks/check/:locationNumber - перевірити блокування<br>
+    - GET /api/locks/all - всі блокування
+  `);
 });
 
 // =====================================================

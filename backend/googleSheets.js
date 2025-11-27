@@ -58,7 +58,7 @@ async function ensureLocksSheetExists() {
         range: `${LOCKS_SHEET_NAME}!A1:D1`,
         valueInputOption: "RAW",
         requestBody: {
-          values: [["Холодильник/Стелаж", "Користувач", "Час початку", "Timestamp"]]
+          values: [["Холодильник/Стелаж", "Користувач", "Час початку", "Дата"]]
         }
       });
       
@@ -85,7 +85,7 @@ export async function lockLocation(locationNumber, userName) {
     
     const now = new Date();
     const time = now.toLocaleTimeString('uk-UA');
-    const timestamp = now.toISOString(); // Використовуємо ISO формат для надійного парсингу
+    const date = now.toLocaleDateString('uk-UA');
     
     // Додаємо новий запис
     await sheets.spreadsheets.values.append({
@@ -93,7 +93,7 @@ export async function lockLocation(locationNumber, userName) {
       range: `${LOCKS_SHEET_NAME}!A:D`,
       valueInputOption: "RAW",
       requestBody: {
-        values: [[locationNumber, userName, time, timestamp]]
+        values: [[locationNumber, userName, time, date]]
       }
     });
     
@@ -174,22 +174,12 @@ export async function checkLock(locationNumber) {
     for (const row of rows) {
       if (row[0] === String(locationNumber)) {
         // Перевіряємо чи не застаріло (більше 30 хвилин)
-        const timestamp = row[3]; // ISO timestamp
+        const lockTime = row[2]; // Час
+        const lockDate = row[3]; // Дата
         
-        // Використовуємо ISO формат для надійного парсингу
-        const lockDateTime = new Date(timestamp);
+        const lockDateTime = new Date(`${lockDate} ${lockTime}`);
         const now = new Date();
-        
-        // Перевіряємо чи дата валідна
-        if (isNaN(lockDateTime.getTime())) {
-          console.warn(`⚠️ Невалідна дата блокування для ${locationNumber}, видаляємо`);
-          await unlockLocation(locationNumber);
-          return null;
-        }
-        
         const diffMinutes = (now - lockDateTime) / 1000 / 60;
-        
-        console.log(`🔍 Перевірка блокування ${locationNumber}: ${diffMinutes.toFixed(1)} хвилин тому`);
         
         if (diffMinutes > 30) {
           // Автоматично розблокувати
@@ -202,7 +192,7 @@ export async function checkLock(locationNumber) {
           locationNumber: row[0],
           userName: row[1],
           time: row[2],
-          timestamp: row[3]
+          date: row[3]
         };
       }
     }
@@ -229,22 +219,17 @@ export async function getAllLocks() {
     
     for (const row of rows) {
       // Перевіряємо таймаут
-      const timestamp = row[3];
-      const lockDateTime = new Date(timestamp);
+      const lockTime = row[2];
+      const lockDate = row[3];
+      const lockDateTime = new Date(`${lockDate} ${lockTime}`);
       const now = new Date();
-      
-      // Пропускаємо невалідні дати
-      if (isNaN(lockDateTime.getTime())) {
-        continue;
-      }
-      
       const diffMinutes = (now - lockDateTime) / 1000 / 60;
       
       if (diffMinutes <= 30) {
         locks[row[0]] = {
           userName: row[1],
           time: row[2],
-          timestamp: row[3]
+          date: row[3]
         };
       }
     }
@@ -290,51 +275,56 @@ export async function readProductsFromSheet() {
       // Додаємо стелажі з колонки B
       if (shelfValue) {
         if (shelfValue.includes(",")) {
-          allLocations.push(...shelfValue.split(",").map(s => s.trim()));
+          allLocations.push(...shelfValue.split(",").map(f => f.trim()));
         } else {
           allLocations.push(shelfValue);
         }
       }
       
-      // Якщо продукт є в декількох локаціях - дублюємо його
+      // Створюємо запис для кожного місця (холодильника або стелажа)
       if (allLocations.length > 0) {
         allLocations.forEach(location => {
           products.push({
+            rowIndex: index + 2,
+            fridge: location,
             name,
             category,
             type,
             unit,
-            fridge: location,
-            rowIndex: index + 2 // +2 бо перший рядок - заголовки
+            quantity: "" // Не читаємо старі залишки
           });
-        });
-      } else {
-        // Якщо локація не вказана
-        products.push({
-          name,
-          category,
-          type,
-          unit,
-          fridge: "Без холодильника",
-          rowIndex: index + 2
         });
       }
     });
 
-    console.log(`✅ Прочитано ${products.length} записів для інвентаризації`);
+    console.log(`📋 Прочитано ${products.length} продуктів з Google Sheets`);
     return products;
   } catch (error) {
-    console.error("Ошибка при чтении из Google Sheets:", error);
-    return [];
+    console.error("❌ Помилка при читанні даних з Google Sheets:", error);
+    throw error;
   }
 }
 
-// 📖 ЧИТАННЯ ДАНИХ З ОКРЕМОГО АРКУША ІНВЕНТАРИЗАЦІЇ
+// 🆕 ЧИТАННЯ ДАНИХ З КОНКРЕТНОГО АРКУША ІНВЕНТАРИЗАЦІЇ
 export async function readInventorySheetData(date) {
   try {
     const sheetName = `Інвентаризація ${date}`;
     
-    // Спочатку читаємо заголовки
+    // Перевіряємо чи існує такий аркуш
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const existingSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === sheetName
+    );
+    
+    if (!existingSheet) {
+      console.log(`⚠️ Аркуш "${sheetName}" не існує`);
+      return null;
+    }
+    
+    // Читаємо заголовки (перший рядок) щоб знайти колонки холодильників
     const headerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1:Z1`,
@@ -342,55 +332,80 @@ export async function readInventorySheetData(date) {
     
     const headers = headerResponse.data.values?.[0] || [];
     
-    // Знаходимо колонки холодильників/стелажів та їх індекси
-    const fridgeColumns = {};
+    // Знаходимо які колонки відповідають яким холодильникам/стелажам
+    const locationColumns = {};
     
     headers.forEach((header, index) => {
+      const columnLetter = String.fromCharCode(65 + index); // A=65, B=66...
+      
+      // Шукаємо колонки типу "Холодильник 1", "Стелаж 3" і т.д.
       const fridgeMatch = header?.match(/Холодильник\s+(\d+)/i);
       const shelfMatch = header?.match(/Стелаж\s+(\d+)/i);
       
       if (fridgeMatch) {
-        fridgeColumns[fridgeMatch[1]] = index;
+        locationColumns[fridgeMatch[1]] = { column: columnLetter, index };
       } else if (shelfMatch) {
-        fridgeColumns[shelfMatch[1]] = index;
+        locationColumns[shelfMatch[1]] = { column: columnLetter, index };
       }
     });
     
-    console.log("📋 Знайдені колонки:", fridgeColumns);
-    
-    // Читаємо всі дані
-    const dataResponse = await sheets.spreadsheets.values.get({
+    // Читаємо дані з аркуша (всі колонки до Z)
+    const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2:Z`,
     });
     
-    const rows = dataResponse.data.values || [];
+    const rows = response.data.values || [];
     const products = [];
     
     rows.forEach((row, index) => {
+      const fridgeValue = row[0] || ""; // Колонка A - Холодильники
+      const shelfValue = row[1] || "";  // Колонка B - Стелажі
       const name = row[2] || "";        // Колонка C - Назва
       const category = row[3] || "";    // Колонка D - Категорія
       const type = row[4] || "";        // Колонка E - Тип
       const unit = row[5] || "кг";      // Колонка F - Одиниці виміру
       
-      // Для кожного холодильника/стелажа створюємо окремий запис
-      Object.keys(fridgeColumns).forEach(fridgeNum => {
-        const colIndex = fridgeColumns[fridgeNum];
-        const quantity = parseFloat(row[colIndex]) || 0;
-        
-        products.push({
-          name,
-          category,
-          type,
-          unit,
-          fridge: fridgeNum,
-          quantity: quantity,
-          rowIndex: index + 2
+      // Об'єднуємо холодильники та стелажі
+      const allLocations = [];
+      
+      if (fridgeValue) {
+        if (fridgeValue.includes(",")) {
+          allLocations.push(...fridgeValue.split(",").map(f => f.trim()));
+        } else {
+          allLocations.push(fridgeValue.trim());
+        }
+      }
+      
+      if (shelfValue) {
+        if (shelfValue.includes(",")) {
+          allLocations.push(...shelfValue.split(",").map(f => f.trim()));
+        } else {
+          allLocations.push(shelfValue.trim());
+        }
+      }
+      
+      // Створюємо запис для кожного місця з реальними залишками
+      if (allLocations.length > 0) {
+        allLocations.forEach(location => {
+          // Знаходимо залишок для цього місця
+          const locationInfo = locationColumns[location];
+          const quantity = locationInfo && row[locationInfo.index] ? row[locationInfo.index] : "";
+          
+          products.push({
+            rowIndex: index + 2,
+            fridge: location,
+            name,
+            category,
+            type,
+            unit,
+            quantity: quantity // Реальний залишок з колонки холодильника!
+          });
         });
-      });
+      }
     });
     
-    console.log(`✅ Прочитано ${products.length} записів з аркуша інвентаризації ${date}`);
+    console.log(`📋 Прочитано ${products.length} продуктів з аркуша "${sheetName}" (з залишками)`);
     return products;
   } catch (error) {
     console.error("❌ Помилка при читанні аркуша інвентаризації:", error);
@@ -398,7 +413,7 @@ export async function readInventorySheetData(date) {
   }
 }
 
-// 🔍 ПЕРЕВІРКА ЧИ ІСНУЄ АРКУШ ІНВЕНТАРИЗАЦІЇ
+// 🆕 ПЕРЕВІРКА ІСНУВАННЯ АРКУША ІНВЕНТАРИЗАЦІЇ
 export async function checkInventorySheetExists(date) {
   try {
     const sheetName = `Інвентаризація ${date}`;
@@ -407,64 +422,136 @@ export async function checkInventorySheetExists(date) {
       spreadsheetId: SPREADSHEET_ID
     });
     
-    const sheet = spreadsheet.data.sheets.find(
-      s => s.properties.title === sheetName
+    const existingSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === sheetName
     );
     
-    return !!sheet;
+    return !!existingSheet;
   } catch (error) {
-    console.error("❌ Помилка перевірки існування аркуша:", error);
+    console.error("❌ Помилка при перевірці існування аркуша:", error);
     return false;
   }
 }
 
-// 📝 СТВОРЕННЯ НОВОГО АРКУША ДЛЯ ІНВЕНТАРИЗАЦІЇ
+// 🆕 СТВОРЕННЯ НОВОГО АРКУША ДЛЯ ІНВЕНТАРИЗАЦІЇ
 export async function createInventorySheet(date) {
   try {
-    const newSheetName = `Інвентаризація ${date}`;
+    const sheetName = `Інвентаризація ${date}`;
     
-    // Отримуємо інформацію про головний аркуш
+    // Перевіряємо чи існує вже такий аркуш
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID
     });
     
-    const masterSheet = spreadsheet.data.sheets.find(
-      s => s.properties.title === MASTER_SHEET_NAME
+    const existingSheet = spreadsheet.data.sheets.find(
+      sheet => sheet.properties.title === sheetName
     );
     
-    if (!masterSheet) {
-      throw new Error(`Не знайдено головний аркуш "${MASTER_SHEET_NAME}"`);
+    if (existingSheet) {
+      console.log(`⚠️ Аркуш "${sheetName}" вже існує`);
+      return sheetName;
     }
     
-    const masterSheetId = masterSheet.properties.sheetId;
+    // Читаємо ВСІ дані з головного аркуша (весь перший рядок з заголовками)
+    const masterData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET_NAME}!A1:Z`, // Читаємо всі колонки до Z
+    });
     
-    // Дублюємо головний аркуш
-    const duplicateResponse = await sheets.spreadsheets.batchUpdate({
+    // Створюємо новий аркуш
+    await sheets.spreadsheets.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
         requests: [{
-          duplicateSheet: {
-            sourceSheetId: masterSheetId,
-            newSheetName: newSheetName,
-            insertSheetIndex: 1 // Вставляємо після першого аркуша
+          addSheet: {
+            properties: {
+              title: sheetName
+            }
           }
         }]
       }
     });
     
-    console.log(`✅ Створено новий аркуш: ${newSheetName}`);
+    const rows = masterData.data.values || [];
     
-    return newSheetName;
+    if (rows.length === 0) {
+      throw new Error("Немає даних в головному аркуші");
+    }
+    
+    // Відфільтровуємо рядки - залишаємо тільки заголовок + продукти з прив'язкою
+    const filteredRows = [];
+    
+    rows.forEach((row, index) => {
+      // Перший рядок (заголовки) - завжди копіюємо
+      if (index === 0) {
+        filteredRows.push(row);
+        return;
+      }
+      
+      // Для інших рядків - перевіряємо чи є прив'язка до холодильника/стелажа
+      const hasLocation = (row[0] && row[0].toString().trim()) || // Колонка A - Холодильник
+                          (row[1] && row[1].toString().trim());    // Колонка B - Стелаж
+      
+      if (hasLocation) {
+        filteredRows.push(row);
+      }
+    });
+    
+    // Копіюємо тільки відфільтровані рядки
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: filteredRows }
+    });
+    
+    // Форматуємо колонки A і B як текст, щоб уникнути апострофів
+    const sheetId = (await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    })).data.sheets.find(s => s.properties.title === sheetName)?.properties?.sheetId;
+    
+    if (sheetId !== undefined) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            repeatCell: {
+              range: {
+                sheetId: sheetId,
+                startColumnIndex: 0, // Колонка A
+                endColumnIndex: 2,   // До колонки B (не включно C)
+                startRowIndex: 1     // Починаючи з рядка 2 (пропускаємо заголовок)
+              },
+              cell: {
+                userEnteredFormat: {
+                  numberFormat: {
+                    type: "TEXT"
+                  }
+                }
+              },
+              fields: "userEnteredFormat.numberFormat"
+            }
+          }]
+        }
+      });
+    }
+    
+    const skippedCount = rows.length - filteredRows.length;
+    console.log(`✅ Створено новий аркуш: ${sheetName}`);
+    console.log(`   📋 Скопійовано: ${filteredRows.length - 1} продуктів (з прив'язкою)`);
+    console.log(`   ⏭️ Пропущено: ${skippedCount} продуктів (без прив'язки)`);
+    console.log(`   📝 Колонки A-B відформатовані як текст`);
+    return sheetName;
   } catch (error) {
-    console.error("❌ Помилка при створенні аркуша інвентаризації:", error);
+    console.error("❌ Помилка при створенні аркуша:", error);
     throw error;
   }
 }
 
-// 📤 ЗАПИС ЗАЛИШКІВ В ОКРЕМИЙ АРКУШ ІНВЕНТАРИЗАЦІЇ (ПЕРЕЗАПИС)
+// 📤 ЗАПИС ЗАЛИШКІВ В НОВИЙ АРКУШ ІНВЕНТАРИЗАЦІЇ (АВТОМАТИЧНИЙ ПОШУК КОЛОНОК)
 export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFridge) {
   try {
-    // Читаємо заголовки
+    // Читаємо заголовки (перший рядок)
     const headerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1:Z1`,
@@ -472,44 +559,51 @@ export async function writeQuantitiesToInventorySheet(sheetName, inventoryByFrid
     
     const headers = headerResponse.data.values?.[0] || [];
     
-    // Знаходимо колонки холодильників/стелажів
+    // Знаходимо які колонки відповідають яким холодильникам/стелажам
     const fridgeColumns = {};
     let totalColumn = null;
     
     headers.forEach((header, index) => {
-      const columnLetter = String.fromCharCode(65 + index);
+      const columnLetter = String.fromCharCode(65 + index); // A=65, B=66...
       
+      // Шукаємо колонки типу "Холодильник 1", "Стелаж 3" і т.д.
       const fridgeMatch = header?.match(/Холодильник\s+(\d+)/i);
       const shelfMatch = header?.match(/Стелаж\s+(\d+)/i);
       
       if (fridgeMatch) {
-        fridgeColumns[fridgeMatch[1]] = columnLetter;
+        const locationNum = fridgeMatch[1];
+        fridgeColumns[locationNum] = columnLetter;
+        console.log(`📋 Знайдено: Холодильник ${locationNum} → колонка ${columnLetter}`);
       } else if (shelfMatch) {
-        fridgeColumns[shelfMatch[1]] = columnLetter;
+        const locationNum = shelfMatch[1];
+        fridgeColumns[locationNum] = columnLetter;
+        console.log(`📋 Знайдено: Стелаж ${locationNum} → колонка ${columnLetter}`);
       }
       
+      // Шукаємо колонку "Залишки"
       if (header?.toLowerCase().includes('залишки')) {
         totalColumn = columnLetter;
+        console.log(`📋 Знайдено: Залишки → колонка ${columnLetter}`);
       }
     });
     
     if (Object.keys(fridgeColumns).length === 0) {
-      console.error("❌ Не знайдено колонок холодильників/стелажів");
+      console.error("❌ Не знайдено жодної колонки з холодильниками чи стелажами");
       console.log("📋 Доступні заголовки:", headers);
-      throw new Error("Не знайдено колонок холодильників/стелажів");
+      throw new Error("Не знайдено жодної колонки з холодильниками чи стелажами");
     }
     
     console.log(`✅ Знайдено ${Object.keys(fridgeColumns).length} колонок холодильників/стелажів`);
     
-    // Читаємо всі дані
-    const dataResponse = await sheets.spreadsheets.values.get({
+    // Читаємо всі дані продуктів (з другого рядка)
+    const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:Z`,
+      range: `${sheetName}!A2:E`,
     });
     
-    const rows = dataResponse.data.values || [];
+    const rows = response.data.values || [];
     
-    // Створюємо Map для швидкого пошуку
+    // Створюємо Map для швидкого пошуку по кожному холодильнику/стелажу
     const dataByFridge = {};
     Object.keys(inventoryByFridge).forEach(fridgeNum => {
       dataByFridge[fridgeNum] = new Map();

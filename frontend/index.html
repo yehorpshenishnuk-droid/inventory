@@ -536,8 +536,12 @@
 
     // Перевірка авторизації
     function checkAuth() {
+      console.log("🔐 checkAuth викликано");
+      
       const code = document.getElementById("auth-code").value;
       const userName = document.getElementById("user-name").value.trim();
+      
+      console.log("Код:", code, "Ім'я:", userName);
       
       if (!userName) {
         document.getElementById("auth-error").textContent = "Будь ласка, введіть ваше ім'я";
@@ -546,6 +550,7 @@
       }
       
       if (code === AUTH_CODE) {
+        console.log("✅ Авторизація успішна!");
         currentUserName = userName;
         localStorage.setItem("userName", userName); // Зберігаємо ім'я
         
@@ -554,6 +559,7 @@
         // Встановлюємо сьогоднішню дату
         document.getElementById("inventory-date").valueAsDate = new Date();
       } else {
+        console.log("❌ Невірний код");
         document.getElementById("auth-error").textContent = "Невірний код";
         document.getElementById("auth-error").style.display = "block";
       }
@@ -563,13 +569,27 @@
     window.addEventListener("DOMContentLoaded", () => {
       const savedName = localStorage.getItem("userName");
       if (savedName) {
-        document.getElementById("user-name").value = savedName;
+        const userNameInput = document.getElementById("user-name");
+        if (userNameInput) {
+          userNameInput.value = savedName;
+        }
       }
-    });
-
-    // Enter для авторизації
-    document.getElementById("auth-code")?.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") checkAuth();
+      
+      // Enter для авторизації
+      const authCodeInput = document.getElementById("auth-code");
+      const userNameInput = document.getElementById("user-name");
+      
+      if (authCodeInput) {
+        authCodeInput.addEventListener("keypress", (e) => {
+          if (e.key === "Enter") checkAuth();
+        });
+      }
+      
+      if (userNameInput) {
+        userNameInput.addEventListener("keypress", (e) => {
+          if (e.key === "Enter") checkAuth();
+        });
+      }
     });
 
     // Початок інвентаризації

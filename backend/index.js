@@ -4,7 +4,6 @@ import cors from "cors";
 import {
   writeProductsToSheet,
   readProductsFromSheet,
-  writeQuantitiesToSheet,
   createInventorySheet,
   writeQuantitiesToInventorySheet,
   readInventorySheetData,
@@ -13,9 +12,9 @@ import {
   SPREADSHEET_ID
 } from "./googleSheets.js";
 
-import { 
-  getPosterProducts, 
-  getAllPosterItems 
+import {
+  getPosterProducts,
+  getAllPosterItems
 } from "./poster.js";
 
 import LockManager from "./lockManager.js";
@@ -238,7 +237,7 @@ app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
 });
 
 // =====================================================
-// БЫСТРЫЕ БЛОКИРОВКИ (в памяти)
+// ЛОКИ НА ХОЛОДИЛЬНИКИ
 // =====================================================
 
 app.post("/api/locks/lock", (req, res) => {

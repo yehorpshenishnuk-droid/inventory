@@ -2,127 +2,144 @@ import express from "express";
 import cors from "cors";
 
 import {
-  addNewPrepacksToSheet,
-  readPrepacksSheet,
-  readProductsFromSheet,
-  ensureSheetExists,
   lockLocation,
   unlockLocation,
   checkLock,
   getAllLocks,
-  sheets,
-  SPREADSHEET_ID
+  readProductsFromSheet,
 } from "./googleSheets.js";
 
 import {
   getPosterProducts,
   getAllPosterItems,
-  getPosterPrepacksFull
 } from "./poster.js";
+
+import { uploadPrepacks } from "./prepacks_uploader.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ========= NEW: Upload semi-prepacks =========
-app.get("/api/prepacks/upload", async (req, res) => {
-  try {
-    const prepacks = await getPosterPrepacksFull();
+// ==========================
+// POSTER PRODUCTS
+// ==========================
 
-    if (!prepacks || prepacks.length === 0) {
-      return res.json({
-        success: false,
-        message: "Poster не вернул полуфабрикаты",
-      });
-    }
-
-    const result = await addNewPrepacksToSheet(prepacks);
-
-    res.json({
-      success: true,
-      added: result.added,
-      message: `Добавлено новых полуфабрикатов: ${result.added}`,
-    });
-  } catch (err) {
-    console.error("Ошибка:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ========= Products from Poster =========
+// Получение продуктов из Poster
 app.get("/api/products", async (req, res) => {
   try {
-    const items = await getPosterProducts();
-    res.json(items);
-  } catch (err) {
-    console.error("Ошибка загрузки продуктов:", err);
-    res.status(500).json({ error: "Ошибка загрузки" });
+    const products = await getPosterProducts();
+    res.json(products);
+  } catch (error) {
+    console.error("Ошибка при получении продуктов:", error);
+    res.status(500).json({ error: "Ошибка при загрузке данных" });
   }
 });
 
-// ========= Upload ALL Poster items to Sheets =========
+// Выгрузка ВСЕХ позиций (продукты + ингредиенты + тех.карты)
 app.get("/api/upload-all-to-sheets", async (req, res) => {
   try {
     const items = await getAllPosterItems();
-    res.json({ success: true, count: items.length });
-  } catch (err) {
-    console.error("Ошибка:", err);
-    res.status(500).json({ error: err.message });
+    res.json({
+      success: true,
+      count: items.length,
+    });
+  } catch (error) {
+    console.error("Ошибка при выгрузке:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ========= LOCKS =========
+// ==========================
+// ВЫГРУЗКА ПОЛУФАБРИКАТОВ В ОТДЕЛЬНЫЙ ЛИСТ
+// ==========================
 
-// Lock
+app.get("/api/prepacks/upload", async (req, res) => {
+  try {
+    const added = await uploadPrepacks();
+    res.json({
+      success: true,
+      added,
+      message: `Добавлено новых полуфабрикатов: ${added}`
+    });
+  } catch (error) {
+    console.error("Ошибка при загрузке полуфабрикатов:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================
+// LOCKS (Блокировка холодильников)
+// ==========================
+
+// Заблокировать место
 app.post("/api/locks/lock", async (req, res) => {
   try {
     const { locationNumber, userName } = req.body;
+
+    if (!locationNumber || !userName) {
+      return res.status(400).json({
+        success: false,
+        error: "Не указан номер или имя пользователя",
+      });
+    }
+
     const result = await lockLocation(locationNumber, userName);
     res.json(result);
-  } catch (err) {
-    console.error("Ошибка блокировки:", err);
-    res.status(500).json({ error: err.message });
+
+  } catch (error) {
+    console.error("Ошибка блокировки:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Unlock
+// Разблокировать место
 app.delete("/api/locks/unlock/:locationNumber", async (req, res) => {
   try {
-    const result = await unlockLocation(req.params.locationNumber);
+    const { locationNumber } = req.params;
+    const result = await unlockLocation(locationNumber);
     res.json(result);
-  } catch (err) {
-    console.error("Ошибка:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error("Ошибка разблокировки:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Check lock
+// Проверить блокировку
 app.get("/api/locks/check/:locationNumber", async (req, res) => {
   try {
-    const lock = await checkLock(req.params.locationNumber);
-    res.json(lock ? { locked: true, ...lock } : { locked: false });
-  } catch (err) {
-    console.error("Ошибка:", err);
-    res.status(500).json({ error: err.message });
+    const { locationNumber } = req.params;
+    const lock = await checkLock(locationNumber);
+
+    if (lock) {
+      res.json({ locked: true, ...lock });
+    } else {
+      res.json({ locked: false });
+    }
+  } catch (error) {
+    console.error("Ошибка проверки:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// All locks
+// Получить все блокировки
 app.get("/api/locks/all", async (req, res) => {
   try {
     const locks = await getAllLocks();
     res.json({ success: true, locks });
-  } catch (err) {
-    console.error("Ошибка:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error("Ошибка при получении блокировок:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ========= Root =========
+// ==========================
+// ROOT PAGE
+// ==========================
+
 app.get("/", (req, res) => {
   res.send(`
-    <h2>Сервер работает</h2>
-    <p>Endpoints:</p>
+    <h2>Сервер працює</h2>
+    <p>Доступні endpoints:</p>
     <ul>
       <li>/api/products</li>
       <li>/api/upload-all-to-sheets</li>
@@ -132,6 +149,9 @@ app.get("/", (req, res) => {
   `);
 });
 
-// ========= START SERVER =========
+// ==========================
+// START SERVER
+// ==========================
+
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Сервер на порту ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Сервер запущено на порту ${PORT}`));

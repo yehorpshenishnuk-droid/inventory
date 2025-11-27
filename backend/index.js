@@ -362,6 +362,623 @@ app.get("/api/sync-prepacks", async (req, res) => {
 });
 
 // =====================================================
+// ДОБАВЛЕНИЕ ФОРМУЛ ВПР ДЛЯ ID НАПІВФАБРИКАТІВ
+// =====================================================
+
+app.get("/api/add-id-formulas", async (req, res) => {
+  try {
+    const MASTER_SHEET = "Лист1";
+    const PREPACKS_SHEET = "Напівфабрикати";
+    
+    console.log("📋 Додаю колонку ID та формули ВПР...");
+    
+    // Получаем данные из Лист1
+    const masterData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET}!A1:F`
+    });
+    
+    const rows = masterData.data.values || [];
+    
+    if (rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Лист1 порожній"
+      });
+    }
+    
+    // Проверяем есть ли уже колонка ID
+    const headers = rows[0];
+    const hasIdColumn = headers.includes("ID");
+    
+    if (hasIdColumn) {
+      return res.json({
+        success: false,
+        message: "Колонка ID вже існує"
+      });
+    }
+    
+    // Добавляем заголовок ID в колонку G
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET}!G1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["ID"]]
+      }
+    });
+    
+    console.log("✅ Додано заголовок ID");
+    
+    // Создаем формулы ВПР для каждой строки
+    const formulas = [];
+    
+    for (let i = 2; i <= rows.length; i++) {
+      // Формула ВПР:
+      // =IFERROR(VLOOKUP(C{i},'Напівфабрикати'!B:A,2,FALSE),"")
+      // Ищет название из колонки C в листе Напівфабрикати (колонка B),
+      // возвращает ID из колонки A
+      
+      const formula = `=IFERROR(VLOOKUP(C${i},'${PREPACKS_SHEET}'!B:A,2,FALSE),"")`;
+      
+      formulas.push({
+        range: `${MASTER_SHEET}!G${i}`,
+        values: [[formula]]
+      });
+    }
+    
+    // Применяем все формулы одним batch update
+    if (formulas.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: "USER_ENTERED", // ВАЖНО: USER_ENTERED для формул
+          data: formulas
+        }
+      });
+      
+      console.log(`✅ Додано ${formulas.length} формул ВПР`);
+    }
+    
+    res.json({
+      success: true,
+      message: `✅ Додано колонку ID та ${formulas.length} формул ВПР`,
+      formulasCount: formulas.length
+    });
+    
+  } catch (err) {
+    console.error("❌ Помилка додавання формул:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// =====================================================
+// ОБНОВЛЕНИЕ ФОРМУЛ ПОСЛЕ СИНХРОНИЗАЦИИ
+// =====================================================
+
+app.get("/api/update-id-formulas", async (req, res) => {
+  try {
+    const MASTER_SHEET = "Лист1";
+    const PREPACKS_SHEET = "Напівфабрикати";
+    
+    console.log("🔄 Оновлюю формули ВПР...");
+    
+    // Получаем данные из Лист1
+    const masterData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET}!A1:G`
+    });
+    
+    const rows = masterData.data.values || [];
+    
+    if (rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Лист1 порожній"
+      });
+    }
+    
+    // Проверяем есть ли колонка ID
+    const headers = rows[0];
+    const idColumnIndex = headers.indexOf("ID");
+    
+    if (idColumnIndex === -1) {
+      return res.json({
+        success: false,
+        message: "Колонка ID не знайдена. Спочатку викличте /api/add-id-formulas"
+      });
+    }
+    
+    // Обновляем формулы для строк где нет ID
+    const formulas = [];
+    
+    for (let i = 1; i < rows.length; i++) {
+      const rowIndex = i + 1;
+      const row = rows[i];
+      
+      // Проверяем есть ли уже ID
+      const hasId = row[idColumnIndex] && row[idColumnIndex].trim() !== "";
+      
+      if (!hasId) {
+        const formula = `=IFERROR(VLOOKUP(C${rowIndex},'${PREPACKS_SHEET}'!B:A,2,FALSE),"")`;
+        
+        formulas.push({
+          range: `${MASTER_SHEET}!G${rowIndex}`,
+          values: [[formula]]
+        });
+      }
+    }
+    
+    if (formulas.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: "USER_ENTERED",
+          data: formulas
+        }
+      });
+      
+      console.log(`✅ Оновлено ${formulas.length} формул`);
+    }
+    
+    res.json({
+      success: true,
+      message: `✅ Оновлено ${formulas.length} формул ВПР`,
+      formulasCount: formulas.length
+    });
+    
+  } catch (err) {
+    console.error("❌ Помилка оновлення формул:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// =====================================================
+// СТВОРЕННЯ ДОВІДНИКА ЛОКАЦІЙ З ЛИСТ1
+// =====================================================
+
+app.get("/api/create-locations-reference", async (req, res) => {
+  try {
+    const MASTER_SHEET = "Лист1";
+    const REFERENCE_SHEET = "Локації-Довідник";
+    
+    console.log("📋 Створюю довідник локацій з Лист1...");
+    
+    // 1. Читаем данные из Лист1
+    const masterData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET}!A2:F`
+    });
+    
+    const rows = masterData.data.values || [];
+    
+    if (rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Лист1 порожній"
+      });
+    }
+    
+    console.log(`📦 Обробляю ${rows.length} рядків...`);
+    
+    // 2. Парсим локации и создаем справочник
+    const locationMap = new Map(); // Назва -> Set локацій
+    
+    rows.forEach(row => {
+      const fridgeValue = row[0] || ""; // Колонка A - Холодильники
+      const shelfValue = row[1] || "";  // Колонка B - Стелажі
+      const name = row[2] || "";        // Колонка C - Назва
+      
+      if (!name) return;
+      
+      // Парсим холодильники
+      const fridges = [];
+      if (fridgeValue) {
+        fridgeValue.split(",").forEach(f => {
+          const trimmed = f.trim();
+          if (trimmed) fridges.push({ type: "Холодильник", number: trimmed });
+        });
+      }
+      
+      // Парсим стелажі
+      const shelves = [];
+      if (shelfValue) {
+        shelfValue.split(",").forEach(s => {
+          const trimmed = s.trim();
+          if (trimmed) shelves.push({ type: "Стелаж", number: trimmed });
+        });
+      }
+      
+      // Объединяем все локации
+      const allLocations = [...fridges, ...shelves];
+      
+      if (allLocations.length > 0) {
+        if (!locationMap.has(name)) {
+          locationMap.set(name, []);
+        }
+        locationMap.get(name).push(...allLocations);
+      }
+    });
+    
+    console.log(`📍 Знайдено ${locationMap.size} позицій з локаціями`);
+    
+    // 3. Создаем новый лист если его нет
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const sheetExists = spreadsheet.data.sheets.find(
+      s => s.properties.title === REFERENCE_SHEET
+    );
+    
+    if (sheetExists) {
+      // Удаляем старый лист
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            deleteSheet: {
+              sheetId: sheetExists.properties.sheetId
+            }
+          }]
+        }
+      });
+      console.log("🗑️ Видалено старий аркуш");
+    }
+    
+    // Создаем новый лист
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{
+          addSheet: {
+            properties: {
+              title: REFERENCE_SHEET
+            }
+          }
+        }]
+      }
+    });
+    
+    console.log(`✅ Створено аркуш "${REFERENCE_SHEET}"`);
+    
+    // 4. Записываем заголовки
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${REFERENCE_SHEET}!A1:C1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["Назва", "Тип локації", "Номер"]]
+      }
+    });
+    
+    // 5. Формируем данные для записи
+    const referenceData = [];
+    
+    for (const [name, locations] of locationMap) {
+      locations.forEach(loc => {
+        referenceData.push([
+          name,
+          loc.type,
+          loc.number
+        ]);
+      });
+    }
+    
+    // Сортируем для удобства
+    referenceData.sort((a, b) => {
+      // Сначала по названию
+      if (a[0] < b[0]) return -1;
+      if (a[0] > b[0]) return 1;
+      // Потом по типу (Холодильник перед Стелаж)
+      if (a[1] < b[1]) return -1;
+      if (a[1] > b[1]) return 1;
+      // Потом по номеру
+      return Number(a[2]) - Number(b[2]);
+    });
+    
+    console.log(`📝 Записую ${referenceData.length} рядків...`);
+    
+    // 6. Записываем данные
+    if (referenceData.length > 0) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${REFERENCE_SHEET}!A2`,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: referenceData
+        }
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: `✅ Створено довідник локацій "${REFERENCE_SHEET}"`,
+      totalProducts: locationMap.size,
+      totalRows: referenceData.length,
+      sheetName: REFERENCE_SHEET
+    });
+    
+  } catch (err) {
+    console.error("❌ Помилка створення довідника:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// =====================================================
+// ВИВЕДЕННЯ ВСІХ ID З POSTER (не тільки напівфабрикати)
+// =====================================================
+
+app.get("/api/upload-all-ids-to-sheets", async (req, res) => {
+  try {
+    const SHEET_NAME = "Всі ID з Poster";
+    
+    console.log("📋 Отримую ВСІ позиції з Poster з ID...");
+    
+    // Получаем ВСЕ позиции из Poster
+    const allItems = await getAllPosterItems();
+    
+    if (!allItems || allItems.length === 0) {
+      return res.json({
+        success: false,
+        message: "Не вдалося отримати дані з Poster"
+      });
+    }
+    
+    console.log(`📦 Отримано: ${allItems.length} позицій`);
+    
+    // Проверяем существует ли лист
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const sheetExists = spreadsheet.data.sheets.find(
+      s => s.properties.title === SHEET_NAME
+    );
+    
+    // Если листа нет - создаем
+    if (!sheetExists) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: SHEET_NAME
+              }
+            }
+          }]
+        }
+      });
+      console.log(`✅ Створено аркуш "${SHEET_NAME}"`);
+    } else {
+      // Очищаем существующий лист
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${SHEET_NAME}!A:D`
+      });
+      console.log("🗑️ Очищено старі дані");
+    }
+    
+    // Записываем заголовки
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A1:D1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["ID", "Назва", "Категорія", "Тип"]]
+      }
+    });
+    
+    // Формируем данные
+    const values = allItems.map(item => [
+      item.id,
+      item.name,
+      item.category,
+      item.type
+    ]);
+    
+    // Записываем данные
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A2`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: values
+      }
+    });
+    
+    console.log(`✅ Записано ${values.length} рядків`);
+    
+    res.json({
+      success: true,
+      message: `✅ ВСІ ID (${allItems.length} шт.) успішно виведені в "${SHEET_NAME}"!`,
+      count: allItems.length,
+      sheetName: SHEET_NAME,
+      breakdown: {
+        products: allItems.filter(i => i.type === "Продукт меню").length,
+        techCards: allItems.filter(i => i.type === "Тех.карта").length,
+        prepacks: allItems.filter(i => i.type === "Напівфабрикат").length,
+        ingredients: allItems.filter(i => i.type === "Інгредієнт").length
+      }
+    });
+    
+  } catch (err) {
+    console.error("Ошибка выгрузки всех ID:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// =====================================================
+// СИНХРОНИЗАЦИЯ ВСЕХ ID (обновление изменений)
+// =====================================================
+
+app.get("/api/sync-all-ids", async (req, res) => {
+  try {
+    const SHEET_NAME = "Всі ID з Poster";
+    
+    console.log("🔄 Синхронізація ВСІХ ID з Poster...");
+    
+    // Получаем актуальные данные из Poster
+    const posterItems = await getAllPosterItems();
+    
+    if (!posterItems || posterItems.length === 0) {
+      return res.json({
+        success: false,
+        message: "Не вдалося отримати дані з Poster"
+      });
+    }
+    
+    // Создаем Map для быстрого поиска по ID
+    const posterMap = new Map();
+    posterItems.forEach(item => {
+      posterMap.set(String(item.id), {
+        name: item.name,
+        category: item.category,
+        type: item.type
+      });
+    });
+    
+    // Проверяем существует ли лист
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const sheetExists = spreadsheet.data.sheets.find(
+      s => s.properties.title === SHEET_NAME
+    );
+    
+    // Если листа нет - создаем полностью
+    if (!sheetExists) {
+      return res.redirect(307, '/api/upload-all-ids-to-sheets');
+    }
+    
+    // Читаем существующие данные
+    const sheetData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A2:D`
+    });
+    
+    const rows = sheetData.data.values || [];
+    
+    // Создаем Map существующих записей
+    const sheetMap = new Map();
+    rows.forEach((row, index) => {
+      if (row[0]) {
+        sheetMap.set(String(row[0]), {
+          name: row[1] || "",
+          category: row[2] || "",
+          type: row[3] || "",
+          rowIndex: index + 2
+        });
+      }
+    });
+    
+    const updates = [];
+    let addedCount = 0;
+    let updatedCount = 0;
+    let deletedCount = 0;
+    
+    // Обновляем существующие и находим новые
+    for (const [id, newData] of posterMap) {
+      if (sheetMap.has(id)) {
+        const existing = sheetMap.get(id);
+        // Проверяем изменилось ли что-то
+        if (existing.name !== newData.name || 
+            existing.category !== newData.category ||
+            existing.type !== newData.type) {
+          updates.push({
+            range: `${SHEET_NAME}!B${existing.rowIndex}:D${existing.rowIndex}`,
+            values: [[newData.name, newData.category, newData.type]]
+          });
+          updatedCount++;
+        }
+      } else {
+        addedCount++;
+      }
+    }
+    
+    // Применяем обновления
+    if (updates.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: updates
+        }
+      });
+    }
+    
+    // Добавляем новые записи
+    if (addedCount > 0) {
+      const newRows = [];
+      for (const [id, data] of posterMap) {
+        if (!sheetMap.has(id)) {
+          newRows.push([id, data.name, data.category, data.type]);
+        }
+      }
+      
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${SHEET_NAME}!A:D`,
+        valueInputOption: "RAW",
+        requestBody: { values: newRows }
+      });
+    }
+    
+    // Помечаем удаленные
+    const deletedRows = [];
+    for (const [id, data] of sheetMap) {
+      if (!posterMap.has(id)) {
+        deletedRows.push({
+          range: `${SHEET_NAME}!D${data.rowIndex}`,
+          values: [["❌ Видалено з Poster"]]
+        });
+        deletedCount++;
+      }
+    }
+    
+    if (deletedRows.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: deletedRows
+        }
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "✅ Синхронізація завершена",
+      added: addedCount,
+      updated: updatedCount,
+      deleted: deletedCount,
+      total: posterItems.length
+    });
+    
+  } catch (err) {
+    console.error("Ошибка синхронизации всех ID:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// =====================================================
 // ИНВЕНТАРИЗАЦИЯ — ЧТЕНИЕ
 // =====================================================
 
@@ -580,8 +1197,41 @@ app.get("/", (req, res) => {
     📤 <strong>Виведення в Google Sheets:</strong><br>
     - GET /api/upload-to-sheets - завантажити продукти<br>
     - GET /api/upload-all-to-sheets - завантажити всі позиції<br>
+    - GET /api/upload-prepacks-to-sheets - завантажити напівфабрикати з ID<br>
+    - GET /api/upload-all-ids-to-sheets - 🆕 <strong>завантажити ВСІ ID з Poster</strong><br>
+    - GET /api/sync-prepacks - синхронізувати напівфабрикати<br>
+    - GET /api/sync-all-ids - 🆕 <strong>синхронізувати ВСІ ID</strong><br><br>
+    
+    🔢 <strong>Формули та ID:</strong><br>
+    - GET /api/add-id-formulas - додати формули ВПР для ID<br>
+    - GET /api/update-id-formulas - оновити формули після змін<br>
+    - GET /api/create-locations-reference - створити довідник локацій<br><br>
+    
+    📋 <strong>Інвентаризація:</strong><br>
+    - GET /api/inventory/products - отримати продукти для інвентаризації<br>
+    - POST /api/inventory/save - зберегти залишки<br>
+    - GET /api/inventory/export-pdf/:sheetName - експорт в PDF<br><br>
+    
+    🔒 <strong>Блокування:</strong><br>
+    - POST /api/locks/lock - заблокувати локацію<br>
+    - DELETE /api/locks/unlock/:locationNumber - розблокувати<br>
+    - GET /api/locks/check/:locationNumber - перевірити блокування<br>
+    - GET /api/locks/all - всі блокування
+  `);
+});ює!<br><br>
+    <strong>Доступні endpoints:</strong><br><br>
+    📦 <strong>Poster API:</strong><br>
+    - GET /api/products - отримати продукти з Poster<br><br>
+    
+    📤 <strong>Виведення в Google Sheets:</strong><br>
+    - GET /api/upload-to-sheets - завантажити продукти<br>
+    - GET /api/upload-all-to-sheets - завантажити всі позиції<br>
     - GET /api/upload-prepacks-to-sheets - завантажити НАПІВФАБРИКАТИ з ID<br>
-    - GET /api/sync-prepacks - 🆕 <strong>СИНХРОНІЗУВАТИ напівфабрикати (оновити зміни)</strong><br><br>
+    - GET /api/sync-prepacks - СИНХРОНІЗУВАТИ напівфабрикати (оновити зміни)<br><br>
+    
+    🔢 <strong>Формули та ID:</strong><br>
+    - GET /api/add-id-formulas - 🆕 <strong>додати формули ВПР для ID напівфабрикатів</strong><br>
+    - GET /api/update-id-formulas - 🆕 <strong>оновити формули після змін</strong><br><br>
     
     📋 <strong>Інвентаризація:</strong><br>
     - GET /api/inventory/products - отримати продукти для інвентаризації<br>

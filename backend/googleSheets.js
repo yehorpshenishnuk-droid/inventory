@@ -1,281 +1,510 @@
+import fs from "fs";
 import { google } from "googleapis";
 
-// ------------------------------
-// Google Auth
-// ------------------------------
+// === Google Sheets credentials ===
+// Читаем ключ из Secret File (Render → Secret Files)
+const CREDENTIALS_PATH = "/etc/secrets/credentials.json";
+
+let credentials;
+try {
+  credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8"));
+} catch (err) {
+  console.error("❌ Ошибка чтения Google Credentials:", err);
+  throw new Error("Не удалось загрузить credentials.json из /etc/secrets/");
+}
+
+// Авторизация Google API
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SERVICE_KEY),
+  credentials,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
-export const sheets = google.sheets({ version: "v4", auth });
-export const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const sheets = google.sheets({ version: "v4", auth });
 
-// -----------------------------------------------------------
-// 1. Запись всех продуктов / позиций в шаблон Лист1
-// -----------------------------------------------------------
-export async function writeProductsToSheet(products) {
-  try {
-    const header = [
-      "Холодильник",
-      "Стелаж",
-      "Назва",
-      "Категорія",
-      "Тип",
-      "Одиниці виміру",
-    ];
+const SPREADSHEET_ID = "1eiJw3ADAdq6GfQxsbJp0STDsc1MyJfPXCf2caQy8khw";
+const MASTER_SHEET_NAME = "Лист1";
+const LOCKS_SHEET_NAME = "Блокування";
 
-    const rows = products.map((p) => [
-      "", // fridge
-      "", // shelf
-      p.name || p.product_name || "",
-      p.category || p.category_name || "",
-      p.type || "",
-      p.unit || "кг",
-    ]);
+// ===================== БЛОКИРОВКИ ============================= //
 
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Лист1!A1:F1`,
-      valueInputOption: "RAW",
-      requestBody: { values: [header] },
-    });
-
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Лист1!A2:F`,
-      valueInputOption: "RAW",
-      requestBody: { values: rows },
-    });
-
-    return true;
-  } catch (err) {
-    console.error("Ошибка записи продуктов:", err);
-    throw err;
-  }
-}
-
-// -----------------------------------------------------------
-// 2. Чтение Лист1 для загрузки данных в инвентаризацию
-// -----------------------------------------------------------
-export async function readProductsFromSheet() {
-  try {
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Лист1!A2:F`,
-    });
-
-    const rows = res.data.values || [];
-
-    return rows.map((row, idx) => ({
-      fridge: row[0] || "",
-      shelf: row[1] || "",
-      name: row[2] || "",
-      category: row[3] || "",
-      type: row[4] || "",
-      unit: row[5] || "",
-      quantity: "",
-      rowIndex: idx + 2,
-    }));
-  } catch (err) {
-    console.error("Ошибка чтения Лист1:", err);
-    throw err;
-  }
-}
-
-// -----------------------------------------------------------
-// 3. Проверка существования листа "Інвентаризація YYYY-MM-DD"
-// -----------------------------------------------------------
-export async function checkInventorySheetExists(date) {
+async function ensureLocksSheetExists() {
   try {
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID,
     });
 
-    const name = `Інвентаризація ${date}`;
-
-    return spreadsheet.data.sheets.some(
-      (s) => s.properties.title === name
+    const exists = spreadsheet.data.sheets.find(
+      (s) => s.properties.title === LOCKS_SHEET_NAME
     );
+
+    if (!exists) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [
+            {
+              addSheet: { properties: { title: LOCKS_SHEET_NAME } },
+            },
+          ],
+        },
+      });
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${LOCKS_SHEET_NAME}!A1:D1`,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [
+            ["Холодильник/Стелаж", "Користувач", "Час початку", "Дата"],
+          ],
+        },
+      });
+
+      console.log("✔ Создан лист Блокування");
+    }
   } catch (err) {
-    console.error("Ошибка проверки листа:", err);
-    return false;
+    console.error("Ошибка ensureLocksSheetExists:", err);
   }
 }
 
-// -----------------------------------------------------------
-// 4. Создание нового листа инвентаризации
-// -----------------------------------------------------------
-export async function createInventorySheet(date) {
-  const sheetName = `Інвентаризація ${date}`;
-
-  const templateRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `Лист1!A1:F`,
-  });
-
-  const header = templateRes.data.values?.[0] || [];
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        { addSheet: { properties: { title: sheetName } } },
-      ],
-    },
-  });
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A1:F1`,
-    valueInputOption: "RAW",
-    requestBody: { values: [header] },
-  });
-
-  return sheetName;
-}
-
-// -----------------------------------------------------------
-// 5. Чтение листа инвентаризации
-// -----------------------------------------------------------
-export async function readInventorySheetData(date) {
+export async function lockLocation(locationNumber, userName) {
   try {
-    const sheetName = `Інвентаризація ${date}`;
+    await ensureLocksSheetExists();
+    const existing = await checkLock(locationNumber);
 
-    const res = await sheets.spreadsheets.values.get({
+    if (existing) {
+      return {
+        success: false,
+        error: `Вже заблоковано користувачем ${existing.userName}`,
+      };
+    }
+
+    const now = new Date();
+    const time = now.toLocaleTimeString("uk-UA");
+    const date = now.toLocaleDateString("uk-UA");
+
+    await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:Z`,
+      range: `${LOCKS_SHEET_NAME}!A:D`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[locationNumber, userName, time, date]],
+      },
     });
 
-    const rows = res.data.values || [];
-
-    return rows.map((row, idx) => ({
-      fridge: row[0] || "",
-      shelf: row[1] || "",
-      name: row[2] || "",
-      category: row[3] || "",
-      type: row[4] || "",
-      unit: row[5] || "",
-      quantity: row[row.length - 1] || "",
-      rowIndex: idx + 2,
-    }));
+    return { success: true };
   } catch (err) {
-    console.error("Ошибка чтения инвентаризации:", err);
+    console.error("Ошибка lockLocation:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function unlockLocation(locationNumber) {
+  try {
+    await ensureLocksSheetExists();
+
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A2:D`,
+    });
+
+    const rows = resp.data.values || [];
+    let targetRow = -1;
+
+    rows.forEach((row, index) => {
+      if (row[0] === String(locationNumber)) {
+        targetRow = index + 2;
+      }
+    });
+
+    if (targetRow > 0) {
+      const spreadsheet = await sheets.spreadsheets.get({
+        spreadsheetId: SPREADSHEET_ID,
+      });
+
+      const sheetId = spreadsheet.data.sheets.find(
+        (s) => s.properties.title === LOCKS_SHEET_NAME
+      ).properties.sheetId;
+
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [
+            {
+              deleteDimension: {
+                range: {
+                  sheetId,
+                  dimension: "ROWS",
+                  startIndex: targetRow - 1,
+                  endIndex: targetRow,
+                },
+              },
+            },
+          ],
+        },
+      });
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Ошибка unlockLocation:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function checkLock(locationNumber) {
+  try {
+    await ensureLocksSheetExists();
+
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A2:D`,
+    });
+
+    const rows = resp.data.values || [];
+
+    for (const row of rows) {
+      if (row[0] === String(locationNumber)) {
+        const lockDateTime = new Date(`${row[3]} ${row[2]}`);
+        const now = new Date();
+        const diff = (now - lockDateTime) / 1000 / 60;
+
+        if (diff > 30) {
+          await unlockLocation(locationNumber);
+          return null;
+        }
+
+        return {
+          locationNumber: row[0],
+          userName: row[1],
+          time: row[2],
+          date: row[3],
+        };
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.error("Ошибка checkLock:", err);
+    return null;
+  }
+}
+
+export async function getAllLocks() {
+  try {
+    await ensureLocksSheetExists();
+
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${LOCKS_SHEET_NAME}!A2:D`,
+    });
+
+    const rows = resp.data.values || [];
+    const locks = {};
+
+    const now = new Date();
+
+    for (const row of rows) {
+      const lockDateTime = new Date(`${row[3]} ${row[2]}`);
+      const diff = (now - lockDateTime) / 1000 / 60;
+
+      if (diff <= 30) {
+        locks[row[0]] = {
+          userName: row[1],
+          time: row[2],
+          date: row[3],
+        };
+      }
+    }
+
+    return locks;
+  } catch (err) {
+    console.error("Ошибка getAllLocks:", err);
+    return {};
+  }
+}
+
+// ========================= ОСНОВНОЙ ЛИСТ ============================= //
+
+export async function readProductsFromSheet() {
+  try {
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET_NAME}!A2:F`,
+    });
+
+    const rows = resp.data.values || [];
+    const result = [];
+
+    rows.forEach((row, i) => {
+      const fridgeValue = row[0] || "";
+      const shelfValue = row[1] || "";
+
+      const locations = [];
+
+      if (fridgeValue) {
+        fridgeValue
+          .split(",")
+          .map((v) => v.trim())
+          .forEach((v) => locations.push(v));
+      }
+
+      if (shelfValue) {
+        shelfValue
+          .split(",")
+          .map((v) => v.trim())
+          .forEach((v) => locations.push(v));
+      }
+
+      locations.forEach((loc) =>
+        result.push({
+          rowIndex: i + 2,
+          fridge: loc,
+          name: row[2] || "",
+          category: row[3] || "",
+          type: row[4] || "",
+          unit: row[5] || "кг",
+          quantity: "",
+        })
+      );
+    });
+
+    return result;
+  } catch (err) {
+    console.error("Ошибка readProductsFromSheet:", err);
     throw err;
   }
 }
 
-// -----------------------------------------------------------
-// 6. Запись остатков в холодильники + сумма "Залишки"
-// -----------------------------------------------------------
+// ====================== ИНВЕНТАРИЗАЦИОННЫЕ ЛИСТЫ ======================= //
+
+export async function checkInventorySheetExists(date) {
+  try {
+    const sheetName = `Інвентаризація ${date}`;
+
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID,
+    });
+
+    return !!spreadsheet.data.sheets.find(
+      (s) => s.properties.title === sheetName
+    );
+  } catch (err) {
+    console.error("Ошибка checkInventorySheetExists:", err);
+    return false;
+  }
+}
+
+export async function createInventorySheet(date) {
+  try {
+    const sheetName = `Інвентаризація ${date}`;
+
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID,
+    });
+
+    const exists = spreadsheet.data.sheets.find(
+      (s) => s.properties.title === sheetName
+    );
+
+    if (exists) return sheetName;
+
+    const master = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${MASTER_SHEET_NAME}!A1:Z`,
+    });
+
+    const rows = master.data.values || [];
+    const filtered = [];
+
+    rows.forEach((r, i) => {
+      if (i === 0) return filtered.push(r);
+
+      const hasLoc =
+        (r[0] && r[0].trim()) || (r[1] && r[1].trim());
+
+      if (hasLoc) filtered.push(r);
+    });
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: sheetName } } }],
+      },
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: filtered },
+    });
+
+    return sheetName;
+  } catch (err) {
+    console.error("Ошибка createInventorySheet:", err);
+    throw err;
+  }
+}
+
+export async function readInventorySheetData(date) {
+  try {
+    const sheetName = `Інвентаризація ${date}`;
+
+    const headerResp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1:Z1`,
+    });
+
+    const headers = headerResp.data.values?.[0] || [];
+
+    const columns = {};
+
+    headers.forEach((h, i) => {
+      const col = String.fromCharCode(65 + i);
+
+      let m1 = h?.match(/Холодильник\s+(\d+)/i);
+      let m2 = h?.match(/Стелаж\s+(\d+)/i);
+
+      if (m1) columns[m1[1]] = { col, index: i };
+      if (m2) columns[m2[1]] = { col, index: i };
+    });
+
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A2:Z`,
+    });
+
+    const rows = resp.data.values || [];
+    const result = [];
+
+    rows.forEach((row, i) => {
+      const fridge = row[0] || "";
+      const shelf = row[1] || "";
+
+      const locs = [];
+
+      if (fridge)
+        fridge.split(",").map((v) => v.trim()).forEach((v) => locs.push(v));
+
+      if (shelf)
+        shelf.split(",").map((v) => v.trim()).forEach((v) => locs.push(v));
+
+      locs.forEach((loc) => {
+        const info = columns[loc];
+        const qty = info ? row[info.index] || "" : "";
+
+        result.push({
+          rowIndex: i + 2,
+          fridge: loc,
+          name: row[2] || "",
+          category: row[3] || "",
+          type: row[4] || "",
+          unit: row[5] || "кг",
+          quantity: qty,
+        });
+      });
+    });
+
+    return result;
+  } catch (err) {
+    console.error("Ошибка readInventorySheetData:", err);
+    return null;
+  }
+}
+
+// ================= ЗАПИС ЗНАЧЕНИЙ В ИНВЕНТАРИЗАЦИЮ ==================== //
+
 export async function writeQuantitiesToInventorySheet(
   sheetName,
   inventoryByFridge
 ) {
   try {
-    // --- 1. Получаем заголовки ---
-    const headerRes = await sheets.spreadsheets.values.get({
+    const headerResp = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1:Z1`,
     });
 
-    const headers = headerRes.data.values?.[0] || [];
+    const headers = headerResp.data.values?.[0] || [];
 
-    const locCols = {}; // { "1": 6, "2": 7, ... }
-    let totalColumnIndex = null;
+    const columns = {};
+    let totalColumn = null;
 
-    // Парсим заголовки
-    headers.forEach((h, idx) => {
-      const match = h.match(/(Холодильник|Стелаж)\s+(\d+)/i);
-      if (match) {
-        const num = match[2];
-        locCols[num] = idx;
-      }
+    headers.forEach((h, i) => {
+      const col = String.fromCharCode(65 + i);
 
-      if (h.toLowerCase().includes("залишки")) {
-        totalColumnIndex = idx;
+      let m1 = h?.match(/Холодильник\s+(\d+)/i);
+      let m2 = h?.match(/Стелаж\s+(\d+)/i);
+
+      if (m1) columns[m1[1]] = { col, index: i };
+      if (m2) columns[m2[1]] = { col, index: i };
+
+      if (h?.toLowerCase() === "залишки") {
+        totalColumn = { col, index: i };
       }
     });
 
-    // Если нет колонки “Залишки”, создаём
-    if (totalColumnIndex === null) {
-      totalColumnIndex = headers.length;
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${sheetName}!${String.fromCharCode(65 + totalColumnIndex)}1`,
-        valueInputOption: "RAW",
-        requestBody: { values: [["Залишки"]] },
-      });
-    }
-
-    // --- 2. Получаем строки с данными ---
-    const dataRes = await sheets.spreadsheets.values.get({
+    const resp = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2:Z`,
     });
 
-    const rows = dataRes.data.values || [];
+    const rows = resp.data.values || [];
+    const updates = [];
 
-    const batch = [];
-
-    // --- 3. Запись значений ---
-    rows.forEach((row, idx) => {
+    rows.forEach((row, rowIndex) => {
       const productName = row[2];
-      const rowIndex = idx + 2;
+      if (!productName) return;
 
-      let total = 0;
-      let hasAnyValue = false;
+      let sum = 0;
+      let hasValue = false;
 
-      // Перебор всех холодильников/стеллажей, существующих в таблице
-      for (const fridgeNum of Object.keys(locCols)) {
-        const colIndex = locCols[fridgeNum];
+      Object.keys(columns).forEach((loc) => {
+        const newValue =
+          inventoryByFridge[loc]?.find((p) => p.name === productName)
+            ?.quantity ?? "";
 
-        const quantity =
-          inventoryByFridge[fridgeNum]?.find(
-            (p) => p.name === productName
-          )?.quantity ?? "";
+        const col = columns[loc].col;
 
-        // Если фронт прислал значение — пишем его
-        if (quantity !== "") {
-          batch.push({
-            range: `${sheetName}!${String.fromCharCode(
-              65 + colIndex
-            )}${rowIndex}`,
-            values: [[quantity]],
+        if (newValue !== "" && !isNaN(newValue)) {
+          hasValue = true;
+          sum += Number(newValue);
+
+          updates.push({
+            range: `${sheetName}!${col}${rowIndex + 2}`,
+            values: [[newValue]],
           });
-
-          const num = parseFloat(quantity);
-          if (!isNaN(num)) {
-            total += num;
-            hasAnyValue = true;
-          }
+        } else {
+          updates.push({
+            range: `${sheetName}!${col}${rowIndex + 2}`,
+            values: [[""]],
+          });
         }
-      }
-
-      // Записываем сумму — только если есть хоть одно число
-      batch.push({
-        range: `${sheetName}!${String.fromCharCode(
-          65 + totalColumnIndex
-        )}${rowIndex}`,
-        values: [[hasAnyValue ? total : ""]],
       });
+
+      if (totalColumn) {
+        updates.push({
+          range: `${sheetName}!${totalColumn.col}${rowIndex + 2}`,
+          values: [[hasValue ? sum : ""]],
+        });
+      }
     });
 
-    // --- 4. batch update ---
-    if (batch.length > 0) {
+    if (updates.length > 0) {
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId: SPREADSHEET_ID,
         requestBody: {
           valueInputOption: "RAW",
-          data: batch,
+          data: updates,
         },
       });
     }
 
     return true;
   } catch (err) {
-    console.error("Ошибка записи остатков:", err);
+    console.error("Ошибка writeQuantitiesToInventorySheet:", err);
     throw err;
   }
 }
+
+export { sheets, SPREADSHEET_ID };

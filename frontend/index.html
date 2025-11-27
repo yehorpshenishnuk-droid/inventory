@@ -523,7 +523,7 @@
     let isExistingInventory = false;
     let currentUserName = ""; // Ім'я поточного користувача
     
-    // 🆕 КЕШ ДАНИХ для оптимізації
+    // 🆕 КЕШ для швидкості
     let dataCache = {
       lastFetch: null,
       data: null
@@ -686,10 +686,6 @@
       inventoryDate = dateInput;
       document.getElementById("date-modal").classList.remove("active");
       
-      // 🆕 СКИДАЄМО КЕШ при виборі нової дати
-      dataCache.lastFetch = null;
-      dataCache.data = null;
-      
       // ✅ СТВОРЮЄМО АРКУШ ОДРАЗУ ПРИ ВИБОРІ ДАТИ
       try {
         const response = await fetch(`${API_URL}/api/inventory/init-sheet`, {
@@ -730,10 +726,9 @@
         allFridges = result.data || result;
         isExistingInventory = result.existingInventory || false;
         
-        // 🆕 ЗБЕРІГАЄМО ДАНІ В КЕШ ОДРАЗУ!
+        // 🆕 Зберігаємо в кеш одразу
         dataCache.data = allFridges;
         dataCache.lastFetch = Date.now();
-        console.log("✅ Дані завантажено та збережено в кеш");
         
         if (isExistingInventory) {
           // Якщо існує інвентаризація за цю дату, завантажуємо збережені дані
@@ -827,7 +822,6 @@
       const lock = await checkLocationLock(fridge.fridgeNumber);
       
       if (lock && lock.userName !== currentUserName) {
-        // Показуємо гарне модальне вікно
         showLockModal(fridge, lock);
         return;
       }
@@ -839,13 +833,12 @@
         return;
       }
       
-      // 🔄 ЗАВАНТАЖУЄМО СВІЖІ ДАНІ ТІЛЬКИ ЯКЩО КЕШ ЗАСТАРІВ
+      // 🆕 Використовуємо кеш (дані вже завантажені в loadData)
       const now = Date.now();
       const cacheValid = dataCache.lastFetch && (now - dataCache.lastFetch) < CACHE_DURATION;
       
       if (!cacheValid || !dataCache.data) {
-        console.log("🔄 Завантажую свіжі дані (кеш застарів або відсутній)");
-        
+        console.log("🔄 Кеш застарів, завантажую свіжі дані");
         try {
           const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
           const result = await response.json();
@@ -853,17 +846,15 @@
           if (result.data) {
             dataCache.data = result.data;
             dataCache.lastFetch = now;
-            console.log("✅ Кеш оновлено");
           }
         } catch (error) {
-          console.error("❌ Помилка завантаження даних:", error);
-          // Продовжуємо роботу навіть якщо не вдалося оновити
+          console.error("❌ Помилка завантаження:", error);
         }
       } else {
-        console.log("⚡ Використовую дані з кешу (економлю час)");
+        console.log("⚡ Використовую кеш (миттєво)");
       }
       
-      // Використовуємо кешовані дані
+      // Оновлюємо дані з кешу
       if (dataCache.data) {
         const freshFridgeData = dataCache.data.find(f => f.fridgeNumber === fridge.fridgeNumber);
         
@@ -875,7 +866,6 @@
             allFridges[index].products = freshFridgeData.products;
           }
           
-          // Оновлюємо inventoryData зі збереженими даними
           const productsWithData = freshFridgeData.products.filter(p => p.savedQuantity && p.savedQuantity !== "");
           
           if (productsWithData.length > 0) {
@@ -888,19 +878,15 @@
               
               if (existingIndex >= 0) {
                 inventoryData[fridge.fridgeNumber][existingIndex].quantity = serverProduct.savedQuantity;
-                console.log("♻️ Оновлено:", serverProduct.name, "=", serverProduct.savedQuantity);
               } else {
                 inventoryData[fridge.fridgeNumber].push({
                   name: serverProduct.name,
                   quantity: serverProduct.savedQuantity
                 });
-                console.log("➕ Додано:", serverProduct.name, "=", serverProduct.savedQuantity);
               }
             });
           }
         }
-        
-        console.log("✅ Оновлено дані для холодильника", fridge.fridgeNumber);
       }
       
       currentFridge = fridge;
@@ -1138,7 +1124,7 @@
         
         if (result.success) {
           console.log("✅ Збережено в Google Sheets");
-          // 🆕 Скидаємо кеш щоб при наступному відкритті завантажились свіжі дані
+          // 🆕 Скидаємо кеш
           dataCache.lastFetch = null;
           dataCache.data = null;
         } else {
@@ -1283,10 +1269,6 @@
         
         if (result.success) {
           // Показуємо модальне вікно з кнопкою завантаження PDF
-          // 🆕 Скидаємо кеш
-          dataCache.lastFetch = null;
-          dataCache.data = null;
-          
           const modalHtml = `
             <div style="text-align: center;">
               <h2 style="color: #10b981; margin-bottom: 20px;">✅ Інвентаризацію успішно збережено!</h2>

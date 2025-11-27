@@ -162,24 +162,28 @@ export async function getAllPosterItems() {
 
   const allItems = [
     ...regularProducts.map(p => ({
+      id: p.product_id,
       name: p.product_name,
       category: p.category_name,
       type: "Продукт меню"
     })),
 
     ...techCards.map(t => ({
+      id: t.product_id,
       name: t.product_name,
       category: t.category_name,
-      type: "Техкарта"
+      type: "Тех.карта"
     })),
 
     ...prepacks.map(p => ({
+      id: p.product_id,
       name: p.product_name,
       category: "Напівфабрикати",
       type: "Напівфабрикат"
     })),
 
     ...ingredients.map(i => ({
+      id: i.ingredient_id,
       name: i.ingredient_name,
       category: i.category_name,
       type: "Інгредієнт"

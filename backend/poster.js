@@ -1,29 +1,191 @@
-// ===== POSTER TOKEN =====
+// ================================
+// Poster API — универсальная новая версия
+// ================================
+
 const POSTER_TOKEN = process.env.POSTER_TOKEN;
 
-// ===== ПОЛУФАБРИКАТЫ =====
-export async function getPosterPrepacksFull() {
-  if (!POSTER_TOKEN) return [];
+// Базовая функция запроса с retry
+async function safeFetch(url, retries = 3, delay = 400) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url);
 
-  const url = `https://joinposter.com/api/menu.getPrepacks?token=${POSTER_TOKEN}`;
+      if (res.status === 429) {
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
 
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
+      if (!res.ok) {
+        throw new Error(`Ошибка Poster API: ${res.status}`);
+      }
 
-    if (!data.response) return [];
+      const data = await res.json();
+      return data;
 
-    return data.response.map((p) => ({
-      id: p.prepack_id,
-      name: p.product_name
-    }));
-  } catch (err) {
-    console.error("Ошибка загрузки полуфабрикатов:", err);
-    return [];
+    } catch (err) {
+      if (i === retries - 1) {
+        console.error(`❌ Poster API failed: ${url}`, err);
+        return null;
+      }
+
+      await new Promise(r => setTimeout(r, delay));
+    }
   }
 }
 
-// ===== ВСЕ ОСТАЛЬНЫЕ ТВОИ ЭКСПОРТЫ ОСТАЮТСЯ =====
-export async function getPosterProducts() { /* твой код */ }
-export async function getPosterIngredients() { /* твой код */ }
-export async function getAllPosterItems() { /* твой код */ }
+// ================================
+// 1. Категории продуктов меню
+// ================================
+
+async function getPosterCategories() {
+  if (!POSTER_TOKEN) return {};
+
+  const url = `https://joinposter.com/api/menu.getCategories?token=${POSTER_TOKEN}`;
+  const data = await safeFetch(url);
+
+  if (!data || !data.response) return {};
+
+  const categories = {};
+  data.response.forEach(cat => {
+    categories[cat.category_id] = cat.category_name;
+  });
+
+  return categories;
+}
+
+// ================================
+// 2. Категории ингредиентов
+// ================================
+
+async function getIngredientCategories() {
+  if (!POSTER_TOKEN) return {};
+
+  const url = `https://joinposter.com/api/menu.getCategoriesIngredients?token=${POSTER_TOKEN}`;
+  const data = await safeFetch(url);
+
+  if (!data || !data.response) return {};
+
+  const categories = {};
+  data.response.forEach(cat => {
+    categories[cat.category_id] = cat.name;
+  });
+
+  return categories;
+}
+
+// ================================
+// 3. Продукты меню + техкарты
+// ================================
+
+export async function getPosterProducts() {
+  if (!POSTER_TOKEN) {
+    console.error("⚠️ POSTER_TOKEN не найден!");
+    return [];
+  }
+
+  const categories = await getPosterCategories();
+  const url = `https://joinposter.com/api/menu.getProducts?token=${POSTER_TOKEN}`;
+
+  const data = await safeFetch(url);
+  if (!data || !data.response) return [];
+
+  return data.response.map(item => ({
+    product_id: item.product_id,
+    product_name: item.product_name,
+    category_name: categories[item.menu_category_id] || item.category_name || "-",
+    item_type: String(item.type) // 2 = техкарта, 3 = продукт
+  }));
+}
+
+// ================================
+// 4. Напівфабрикати
+// ================================
+
+export async function getPosterPrepacks() {
+  if (!POSTER_TOKEN) return [];
+
+  const url = `https://joinposter.com/api/menu.getPrepacks?token=${POSTER_TOKEN}`;
+  const data = await safeFetch(url);
+
+  if (!data || !data.response) return [];
+
+  return data.response.map(item => ({
+    product_id: item.product_id,
+    product_name: item.product_name
+  }));
+}
+
+// ================================
+// 5. Інгредієнти
+// ================================
+
+export async function getPosterIngredients() {
+  if (!POSTER_TOKEN) {
+    console.error("⚠️ POSTER_TOKEN не найден!");
+    return [];
+  }
+
+  const categories = await getIngredientCategories();
+  const url = `https://joinposter.com/api/menu.getIngredients?token=${POSTER_TOKEN}`;
+
+  const data = await safeFetch(url);
+  if (!data || !data.response) return [];
+
+  return data.response.map(item => ({
+    ingredient_id: item.ingredient_id,
+    ingredient_name: item.ingredient_name,
+    category_name: categories[item.category_id] || "-"
+  }));
+}
+
+// ================================
+// 6. Объединение всех позиций для инвентаризации
+// ================================
+
+export async function getAllPosterItems() {
+  console.log("📡 Загружаю данные из Poster...");
+
+  const [products, prepacks, ingredients] = await Promise.all([
+    getPosterProducts(),
+    getPosterPrepacks(),
+    getPosterIngredients()
+  ]);
+
+  // Отдельно делим продукты на обычные и техкарты
+  const regularProducts = [];
+  const techCards = [];
+
+  products.forEach(item => {
+    if (item.item_type === "2") techCards.push(item);
+    else regularProducts.push(item);
+  });
+
+  const allItems = [
+    ...regularProducts.map(p => ({
+      name: p.product_name,
+      category: p.category_name,
+      type: "Продукт меню"
+    })),
+
+    ...techCards.map(t => ({
+      name: t.product_name,
+      category: t.category_name,
+      type: "Техкарта"
+    })),
+
+    ...prepacks.map(p => ({
+      name: p.product_name,
+      category: "Напівфабрикати",
+      type: "Напівфабрикат"
+    })),
+
+    ...ingredients.map(i => ({
+      name: i.ingredient_name,
+      category: i.category_name,
+      type: "Інгредієнт"
+    }))
+  ];
+
+  console.log("📦 ВСЕГО ПОЗИЦИЙ:", allItems.length);
+  return allItems;
+}

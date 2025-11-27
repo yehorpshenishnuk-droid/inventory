@@ -523,13 +523,6 @@
     let isExistingInventory = false;
     let currentUserName = ""; // Ім'я поточного користувача
     
-    // 🆕 КЕШ для швидкості
-    let dataCache = {
-      lastFetch: null,
-      data: null
-    };
-    const CACHE_DURATION = 30000; // 30 секунд
-    
     // Визначення типу холодильника/стелажа
     const SHELVES = ['3', '4', '8', '16']; // Номери стелажів
     
@@ -726,10 +719,6 @@
         allFridges = result.data || result;
         isExistingInventory = result.existingInventory || false;
         
-        // 🆕 Зберігаємо в кеш одразу
-        dataCache.data = allFridges;
-        dataCache.lastFetch = Date.now();
-        
         if (isExistingInventory) {
           // Якщо існує інвентаризація за цю дату, завантажуємо збережені дані
           allFridges.forEach(fridge => {
@@ -822,6 +811,7 @@
       const lock = await checkLocationLock(fridge.fridgeNumber);
       
       if (lock && lock.userName !== currentUserName) {
+        // Показуємо гарне модальне вікно
         showLockModal(fridge, lock);
         return;
       }
@@ -833,60 +823,65 @@
         return;
       }
       
-      // 🆕 Використовуємо кеш (дані вже завантажені в loadData)
-      const now = Date.now();
-      const cacheValid = dataCache.lastFetch && (now - dataCache.lastFetch) < CACHE_DURATION;
+      // 🔄 ЗАВАНТАЖУЄМО СВІЖІ ДАНІ З СЕРВЕРА
+      console.log("🔄 Завантажую свіжі дані для дати:", inventoryDate);
       
-      if (!cacheValid || !dataCache.data) {
-        console.log("🔄 Кеш застарів, завантажую свіжі дані");
-        try {
-          const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
-          const result = await response.json();
-          
-          if (result.data) {
-            dataCache.data = result.data;
-            dataCache.lastFetch = now;
-          }
-        } catch (error) {
-          console.error("❌ Помилка завантаження:", error);
-        }
-      } else {
-        console.log("⚡ Використовую кеш (миттєво)");
-      }
-      
-      // Оновлюємо дані з кешу
-      if (dataCache.data) {
-        const freshFridgeData = dataCache.data.find(f => f.fridgeNumber === fridge.fridgeNumber);
+      try {
+        const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
+        const result = await response.json();
         
-        if (freshFridgeData && freshFridgeData.products) {
-          fridge.products = freshFridgeData.products;
+        console.log("📦 Отримано відповідь:", result);
+        
+        if (result.data) {
+          // Знаходимо цей конкретний холодильник в свіжих даних
+          const freshFridgeData = result.data.find(f => f.fridgeNumber === fridge.fridgeNumber);
           
-          const index = allFridges.findIndex(f => f.fridgeNumber === fridge.fridgeNumber);
-          if (index >= 0) {
-            allFridges[index].products = freshFridgeData.products;
-          }
+          console.log("🎯 Свіжі дані для холодильника", fridge.fridgeNumber, ":", freshFridgeData);
           
-          const productsWithData = freshFridgeData.products.filter(p => p.savedQuantity && p.savedQuantity !== "");
-          
-          if (productsWithData.length > 0) {
-            if (!inventoryData[fridge.fridgeNumber]) {
-              inventoryData[fridge.fridgeNumber] = [];
+          if (freshFridgeData && freshFridgeData.products) {
+            // Оновлюємо fridge об'єкт свіжими даними
+            fridge.products = freshFridgeData.products;
+            
+            // Також оновлюємо в allFridges
+            const index = allFridges.findIndex(f => f.fridgeNumber === fridge.fridgeNumber);
+            if (index >= 0) {
+              allFridges[index].products = freshFridgeData.products;
             }
             
-            productsWithData.forEach(serverProduct => {
-              const existingIndex = inventoryData[fridge.fridgeNumber].findIndex(p => p.name === serverProduct.name);
-              
-              if (existingIndex >= 0) {
-                inventoryData[fridge.fridgeNumber][existingIndex].quantity = serverProduct.savedQuantity;
-              } else {
-                inventoryData[fridge.fridgeNumber].push({
-                  name: serverProduct.name,
-                  quantity: serverProduct.savedQuantity
-                });
+            // Оновлюємо inventoryData з збереженими даними
+            const productsWithData = freshFridgeData.products.filter(p => p.savedQuantity && p.savedQuantity !== "");
+            
+            console.log("💾 Продукти зі збереженими даними:", productsWithData);
+            
+            if (productsWithData.length > 0) {
+              if (!inventoryData[fridge.fridgeNumber]) {
+                inventoryData[fridge.fridgeNumber] = [];
               }
-            });
+              
+              productsWithData.forEach(serverProduct => {
+                const existingIndex = inventoryData[fridge.fridgeNumber].findIndex(p => p.name === serverProduct.name);
+                
+                if (existingIndex >= 0) {
+                  // Якщо вже є - оновлюємо
+                  inventoryData[fridge.fridgeNumber][existingIndex].quantity = serverProduct.savedQuantity;
+                  console.log("♻️ Оновлено:", serverProduct.name, "=", serverProduct.savedQuantity);
+                } else {
+                  // Додаємо новий
+                  inventoryData[fridge.fridgeNumber].push({
+                    name: serverProduct.name,
+                    quantity: serverProduct.savedQuantity
+                  });
+                  console.log("➕ Додано:", serverProduct.name, "=", serverProduct.savedQuantity);
+                }
+              });
+            }
           }
+          
+          console.log("✅ Оновлено дані для холодильника", fridge.fridgeNumber);
         }
+      } catch (error) {
+        console.error("❌ Помилка завантаження свіжих даних:", error);
+        // Продовжуємо роботу навіть якщо не вдалося оновити
       }
       
       currentFridge = fridge;
@@ -1124,9 +1119,6 @@
         
         if (result.success) {
           console.log("✅ Збережено в Google Sheets");
-          // 🆕 Скидаємо кеш
-          dataCache.lastFetch = null;
-          dataCache.data = null;
         } else {
           console.error("❌ Помилка збереження:", result.error);
         }

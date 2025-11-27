@@ -1,189 +1,184 @@
-// Токен берется из переменных окружения Render
+// ================================
+// Poster API — универсальная новая версия
+// ================================
+
 const POSTER_TOKEN = process.env.POSTER_TOKEN;
 
-// ===== КАТЕГОРИИ =====
+// Базовая функция запроса с retry
+async function safeFetch(url, retries = 3, delay = 400) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url);
 
-// Получаем категории продуктов меню
+      if (res.status === 429) {
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+
+      if (!res.ok) {
+        throw new Error(`Ошибка Poster API: ${res.status}`);
+      }
+
+      const data = await res.json();
+      return data;
+
+    } catch (err) {
+      if (i === retries - 1) {
+        console.error(`❌ Poster API failed: ${url}`, err);
+        return null;
+      }
+
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+// ================================
+// 1. Категории продуктов меню
+// ================================
+
 async function getPosterCategories() {
   if (!POSTER_TOKEN) return {};
 
   const url = `https://joinposter.com/api/menu.getCategories?token=${POSTER_TOKEN}`;
+  const data = await safeFetch(url);
 
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
+  if (!data || !data.response) return {};
 
-    if (!data.response) return {};
+  const categories = {};
+  data.response.forEach(cat => {
+    categories[cat.category_id] = cat.category_name;
+  });
 
-    const categories = {};
-    data.response.forEach((cat) => {
-      categories[cat.category_id] = cat.category_name;
-    });
-
-    return categories;
-  } catch (err) {
-    console.error("Ошибка при получении категорий:", err);
-    return {};
-  }
+  return categories;
 }
 
-// Получаем категории ингредиентов
+// ================================
+// 2. Категории ингредиентов
+// ================================
+
 async function getIngredientCategories() {
   if (!POSTER_TOKEN) return {};
 
   const url = `https://joinposter.com/api/menu.getCategoriesIngredients?token=${POSTER_TOKEN}`;
+  const data = await safeFetch(url);
 
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
+  if (!data || !data.response) return {};
 
-    if (!data.response) return {};
+  const categories = {};
+  data.response.forEach(cat => {
+    categories[cat.category_id] = cat.name;
+  });
 
-    const categories = {};
-    data.response.forEach((cat) => {
-      categories[cat.category_id] = cat.name;
-    });
-
-    return categories;
-  } catch (err) {
-    console.error("Ошибка при получении категорий ингредиентов:", err);
-    return {};
-  }
+  return categories;
 }
 
-// ===== 1. ПРОДУКТЫ МЕНЮ + ТЕХ.КАРТЫ =====
+// ================================
+// 3. Продукты меню + техкарты
+// ================================
 
 export async function getPosterProducts() {
   if (!POSTER_TOKEN) {
-    console.error("⚠️ POSTER_TOKEN не найден в переменных окружения!");
+    console.error("⚠️ POSTER_TOKEN не найден!");
     return [];
   }
 
   const categories = await getPosterCategories();
   const url = `https://joinposter.com/api/menu.getProducts?token=${POSTER_TOKEN}`;
 
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
+  const data = await safeFetch(url);
+  if (!data || !data.response) return [];
 
-    if (!data.response) {
-      console.error("Ошибка при получении продуктов из Poster:", data);
-      return [];
-    }
-
-    console.log(`📋 Получено продуктов и тех.карт: ${data.response.length}`);
-
-    return data.response.map((item) => ({
-      product_id: item.product_id,
-      product_name: item.product_name,
-      category_name: categories[item.menu_category_id] || item.category_name || "-",
-      item_type: item.type, // 2 = тех.карта, 3 = продукт
-    }));
-  } catch (err) {
-    console.error("Ошибка при получении продуктов:", err);
-    return [];
-  }
+  return data.response.map(item => ({
+    product_id: item.product_id,
+    product_name: item.product_name,
+    category_name: categories[item.menu_category_id] || item.category_name || "-",
+    item_type: String(item.type) // 2 = техкарта, 3 = продукт
+  }));
 }
 
-// ===== 2. НАПІВФАБРИКАТИ =====
+// ================================
+// 4. Напівфабрикати
+// ================================
 
 export async function getPosterPrepacks() {
   if (!POSTER_TOKEN) return [];
 
   const url = `https://joinposter.com/api/menu.getPrepacks?token=${POSTER_TOKEN}`;
+  const data = await safeFetch(url);
 
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
+  if (!data || !data.response) return [];
 
-    if (!data.response) {
-      console.log("⚠️ Напівфабрикати не знайдені");
-      return [];
-    }
-
-    console.log(`🍽️ Получено напівфабрикатів: ${data.response.length}`);
-
-    return data.response.map((item) => ({
-      product_id: item.product_id,
-      product_name: item.product_name,
-    }));
-  } catch (err) {
-    console.error("Ошибка при получении напівфабрикатів:", err);
-    return [];
-  }
+  return data.response.map(item => ({
+    product_id: item.product_id,
+    product_name: item.product_name
+  }));
 }
 
-// ===== 3. ІНГРЕДІЄНТИ =====
+// ================================
+// 5. Інгредієнти
+// ================================
 
 export async function getPosterIngredients() {
   if (!POSTER_TOKEN) {
-    console.error("⚠️ POSTER_TOKEN не найден в переменных окружения!");
+    console.error("⚠️ POSTER_TOKEN не найден!");
     return [];
   }
 
   const categories = await getIngredientCategories();
   const url = `https://joinposter.com/api/menu.getIngredients?token=${POSTER_TOKEN}`;
 
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
+  const data = await safeFetch(url);
+  if (!data || !data.response) return [];
 
-    if (!data.response) {
-      console.error("Ошибка при получении ингредиентов из Poster:", data);
-      return [];
-    }
-
-    console.log(`📦 Получено ингредиентов: ${data.response.length}`);
-
-    return data.response.map((item) => ({
-      ingredient_id: item.ingredient_id,
-      ingredient_name: item.ingredient_name,
-      category_name: categories[item.category_id] || "-",
-    }));
-  } catch (err) {
-    console.error("Ошибка при получении ингредиентов:", err);
-    return [];
-  }
+  return data.response.map(item => ({
+    ingredient_id: item.ingredient_id,
+    ingredient_name: item.ingredient_name,
+    category_name: categories[item.category_id] || "-"
+  }));
 }
 
-// ===== ОБЪЕДИНЯЕМ ВСЕ ДЛЯ ИНВЕНТАРИЗАЦИИ =====
+// ================================
+// 6. Объединение всех позиций для инвентаризации
+// ================================
 
 export async function getAllPosterItems() {
+  console.log("📡 Загружаю данные из Poster...");
+
   const [products, prepacks, ingredients] = await Promise.all([
     getPosterProducts(),
     getPosterPrepacks(),
     getPosterIngredients()
   ]);
 
-  // Разделяем продукты на обычные и тех.карты
+  // Отдельно делим продукты на обычные и техкарты
   const regularProducts = [];
   const techCards = [];
-  
+
   products.forEach(item => {
-    if (item.item_type === "2") {
-      techCards.push(item);
-    } else {
-      regularProducts.push(item);
-    }
+    if (item.item_type === "2") techCards.push(item);
+    else regularProducts.push(item);
   });
 
-  // Объединяем все позиции
   const allItems = [
     ...regularProducts.map(p => ({
       name: p.product_name,
       category: p.category_name,
       type: "Продукт меню"
     })),
+
     ...techCards.map(t => ({
       name: t.product_name,
       category: t.category_name,
-      type: "Тех.карта"
+      type: "Техкарта"
     })),
+
     ...prepacks.map(p => ({
       name: p.product_name,
       category: "Напівфабрикати",
       type: "Напівфабрикат"
     })),
+
     ...ingredients.map(i => ({
       name: i.ingredient_name,
       category: i.category_name,
@@ -191,11 +186,6 @@ export async function getAllPosterItems() {
     }))
   ];
 
-  console.log(`📦 ВСЬОГО позицій: ${allItems.length}`);
-  console.log(`   - Продуктів меню: ${regularProducts.length}`);
-  console.log(`   - Тех.карт: ${techCards.length}`);
-  console.log(`   - Напівфабрикатів: ${prepacks.length}`);
-  console.log(`   - Інгредієнтів: ${ingredients.length}`);
-  
+  console.log("📦 ВСЕГО ПОЗИЦИЙ:", allItems.length);
   return allItems;
 }

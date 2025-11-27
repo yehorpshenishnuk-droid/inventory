@@ -3,321 +3,310 @@ import cors from "cors";
 
 import {
   readProductsFromSheet,
-  mergePosterItemsToSheet,
   createInventorySheet,
-  readInventorySheetData,
   writeQuantitiesToInventorySheet,
+  readInventorySheetData,
   checkInventorySheetExists,
-  lockLocation,
-  unlockLocation,
-  checkLock,
-  getAllLocks,
-  SPREADSHEET_ID,
-  sheets
+  sheets,
+  SPREADSHEET_ID
 } from "./googleSheets.js";
 
-import { getPosterProducts, getAllPosterItems } from "./poster.js";
+import {
+  getPosterProducts,
+  getAllPosterItems
+} from "./poster.js";
+
+import LockManager from "./lockManager.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// -------------------------------------------------------------
-// Тестовые данные на случай если Poster не работает
-// -------------------------------------------------------------
-const testProducts = [
+// =====================================================
+// POSTER API — получение продуктов
+// =====================================================
+
+const fallbackProducts = [
   { product_id: 1, product_name: "Кофе", menu_category_name: "Напитки" },
   { product_id: 2, product_name: "Круассан", menu_category_name: "Выпечка" },
   { product_id: 3, product_name: "Сэндвич", menu_category_name: "Закуски" },
 ];
 
-// -------------------------------------------------------------
-// Получение продуктов (для фронтенда)
-// -------------------------------------------------------------
 app.get("/api/products", async (req, res) => {
   try {
     const products = await getPosterProducts();
 
-    if (products.length === 0) {
-      return res.json(testProducts);
+    if (!products || products.length === 0) {
+      return res.json(fallbackProducts);
     }
 
     res.json(products);
   } catch (err) {
-    res.status(500).json({ error: "Ошибка при загрузке продуктов" });
+    res.status(500).json({ error: "Ошибка загрузки продуктов" });
   }
 });
 
-// -------------------------------------------------------------
-// ПОЛНОЕ ОБНОВЛЕНИЕ LIST1 — ТОЛЬКО ДОБАВЛЕНИЕ НОВЫХ ТОВАРОВ
-// -------------------------------------------------------------
-app.get("/api/upload-all-to-sheets", async (req, res) => {
+// =====================================================
+// ВЫГРУЗКА В GOOGLE SHEETS
+// =====================================================
+
+app.get("/api/upload-to-sheets", async (req, res) => {
   try {
-    const posterItems = await getAllPosterItems();
+    const posterData = await getPosterProducts();
+    const data = posterData.length ? posterData : fallbackProducts;
 
-    if (!posterItems || posterItems.length === 0) {
-      return res.json({
-        success: false,
-        message: "Poster API вернул пустой список",
-      });
-    }
-
-    const result = await mergePosterItemsToSheet(posterItems);
+    await writeProductsToSheet(data);
 
     res.json({
       success: true,
-      message: `Добавлено новых позиций: ${result.added}`,
+      count: data.length,
+      message: "Данные выгружены"
     });
-  } catch (error) {
-    console.error("Ошибка при обновлении таблицы:", error);
-    res.status(500).json({ error: error.message });
+
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// -------------------------------------------------------------
-// Получение данных для инвентаризации
-// -------------------------------------------------------------
+app.get("/api/upload-all-to-sheets", async (req, res) => {
+  try {
+    const all = await getAllPosterItems();
+
+    if (!all.length) {
+      return res.json({ success: false, message: "Нет данных Poster" });
+    }
+
+    await writeProductsToSheet(all);
+
+    res.json({
+      success: true,
+      message: "Все позиции выгружены",
+      count: all.length
+    });
+
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// =====================================================
+// ИНВЕНТАРИЗАЦИЯ — ЧТЕНИЕ
+// =====================================================
+
 app.get("/api/inventory/products", async (req, res) => {
   try {
     const { date } = req.query;
 
-    if (date) {
-      const exists = await checkInventorySheetExists(date);
+    // Если есть существующий лист — читаем его
+    if (date && await checkInventorySheetExists(date)) {
+      const inventoryData = await readInventorySheetData(date);
 
-      if (exists) {
-        const inventoryData = await readInventorySheetData(date);
-
-        const fridges = {};
-        inventoryData.forEach((product) => {
-          const fridgeNum = product.fridge || "Без холодильника";
-
-          if (!fridges[fridgeNum]) fridges[fridgeNum] = [];
-
-          fridges[fridgeNum].push({
-            name: product.name,
-            category: product.category,
-            type: product.type,
-            unit: product.unit,
-            currentQuantity: product.total || 0,
-            savedQuantity: product.total || "",
-            rowIndex: product.rowIndex,
-          });
-        });
-
+      if (inventoryData) {
+        const grouped = groupInventory(inventoryData);
         return res.json({
-          data: Object.keys(fridges).map((key) => ({
-            fridgeNumber: key,
-            products: fridges[key],
-          })),
+          data: grouped,
           existingInventory: true,
-          date,
+          date
         });
       }
     }
 
+    // Иначе читаем шаблон Лист1
     const products = await readProductsFromSheet();
-
-    const fridges = {};
-    products.forEach((product) => {
-      const fridgeNum = product.fridge || "Без холодильника";
-      if (!fridges[fridgeNum]) fridges[fridgeNum] = [];
-      fridges[fridgeNum].push(product);
-    });
+    const grouped = groupInventory(products);
 
     res.json({
-      data: Object.keys(fridges).map((key) => ({
-        fridgeNumber: key,
-        products: fridges[key],
-      })),
-      existingInventory: false,
+      data: grouped,
+      existingInventory: false
     });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// -------------------------------------------------------------
-// СОХРАНЕНИЕ ИНВЕНТАРИЗАЦИИ
-// -------------------------------------------------------------
+// Группировка по холодильникам
+function groupInventory(products) {
+  const fridges = {};
+
+  products.forEach(item => {
+    const loc = item.fridge || "Без холодильника";
+
+    if (!fridges[loc]) fridges[loc] = [];
+
+    fridges[loc].push({
+      name: item.name,
+      category: item.category,
+      type: item.type,
+      unit: item.unit || "кг",
+      currentQuantity: item.quantity || "",
+      savedQuantity: item.quantity || "",
+      rowIndex: item.rowIndex
+    });
+  });
+
+  return Object.keys(fridges).map(loc => ({
+    fridgeNumber: loc,
+    products: fridges[loc]
+  }));
+}
+
+// =====================================================
+// ИНВЕНТАРИЗАЦИЯ — СОХРАНЕНИЕ
+// =====================================================
+
 app.post("/api/inventory/save", async (req, res) => {
   try {
     const { inventoryData, inventoryDate } = req.body;
 
-    if (!inventoryData || !Array.isArray(inventoryData))
-      return res.status(400).json({ error: "Неверный формат данных" });
-
-    if (!inventoryDate)
-      return res.status(400).json({ error: "Дата не указана" });
-
-    const exists = await checkInventorySheetExists(inventoryDate);
-
-    let sheetName;
-    if (!exists) {
-      sheetName = await createInventorySheet(inventoryDate);
-    } else {
-      sheetName = `Інвентаризація ${inventoryDate}`;
-    }
-
-    const inventoryByFridge = {};
-
-    inventoryData.forEach((fridge) => {
-      inventoryByFridge[fridge.fridgeNumber] = fridge.products.map((p) => ({
-        name: p.name,
-        quantity: p.quantity,
-      }));
-    });
-
-    await writeQuantitiesToInventorySheet(sheetName, inventoryByFridge);
-
-    res.json({
-      success: true,
-      message: `Инвентаризация сохранена в "${sheetName}"`,
-      sheetName,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// -------------------------------------------------------------
-// Создать лист при выборе даты
-// -------------------------------------------------------------
-app.post("/api/inventory/init-sheet", async (req, res) => {
-  try {
-    const { inventoryDate } = req.body;
-
-    if (!inventoryDate) {
+    if (!inventoryData || !inventoryDate) {
       return res.status(400).json({
         success: false,
-        error: "Дата не указана",
+        error: "Некорректные данные"
       });
     }
 
-    const exists = await checkInventorySheetExists(inventoryDate);
-
     let sheetName;
-    if (!exists) {
+
+    if (!await checkInventorySheetExists(inventoryDate)) {
       sheetName = await createInventorySheet(inventoryDate);
     } else {
       sheetName = `Інвентаризація ${inventoryDate}`;
     }
 
+    const dataByFridge = {};
+
+    inventoryData.forEach(fridge => {
+      dataByFridge[fridge.fridgeNumber] = fridge.products.map(item => ({
+        name: item.name,
+        quantity: item.quantity
+      }));
+    });
+
+    await writeQuantitiesToInventorySheet(sheetName, dataByFridge);
+
     res.json({
       success: true,
-      existed: exists,
-      sheetName,
+      message: "Инвентаризация сохранена",
+      sheetName
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// -------------------------------------------------------------
-// Экспорт PDF
-// -------------------------------------------------------------
+// =====================================================
+// PDF EXPORT
+// =====================================================
+
 app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
   try {
     const sheetName = decodeURIComponent(req.params.sheetName);
 
     const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: SPREADSHEET_ID
     });
 
     const sheet = spreadsheet.data.sheets.find(
-      (s) => s.properties.title === sheetName
+      s => s.properties.title === sheetName
     );
 
     if (!sheet) {
       return res.status(404).json({
         success: false,
-        error: `Аркуш "${sheetName}" не найден`,
+        error: "Лист не найден"
       });
     }
 
-    const sheetId = sheet.properties.sheetId;
+    const gid = sheet.properties.sheetId;
 
-    const exportUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=pdf&gid=${sheetId}&portrait=false&fitw=true`;
+    const exportUrl =
+      `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=pdf&gid=${gid}&portrait=false&fitw=true`;
 
     res.json({
       success: true,
       downloadUrl: exportUrl,
-      sheetName,
+      sheetName
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// -------------------------------------------------------------
-// БЛОКИРОВКИ
-// -------------------------------------------------------------
-app.post("/api/locks/lock", async (req, res) => {
-  try {
-    const { locationNumber, userName } = req.body;
+// =====================================================
+// ЛОКИ НА ХОЛОДИЛЬНИКИ
+// =====================================================
 
-    if (!locationNumber || !userName) {
-      return res.status(400).json({
-        success: false,
-        error: "Не указан номер или имя пользователя",
-      });
-    }
+app.post("/api/locks/lock", (req, res) => {
+  const { locationNumber, userName } = req.body;
 
-    const result = await lockLocation(locationNumber, userName);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  if (!locationNumber || !userName) {
+    return res.status(400).json({
+      success: false,
+      error: "Нет данных"
+    });
   }
+
+  const exists = LockManager.getLock(locationNumber);
+
+  if (exists) {
+    return res.json({
+      success: false,
+      error: `Стеллаж/холодильник уже открыт пользователем ${exists.userName}`
+    });
+  }
+
+  LockManager.setLock(locationNumber, userName);
+  res.json({ success: true });
 });
 
-app.delete("/api/locks/unlock/:locationNumber", async (req, res) => {
-  try {
-    const { locationNumber } = req.params;
+app.get("/api/locks/check/:locationNumber", (req, res) => {
+  const { locationNumber } = req.params;
 
-    const result = await unlockLocation(locationNumber);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  const lock = LockManager.getLock(locationNumber);
+
+  if (!lock) {
+    return res.json({ locked: false });
   }
+
+  res.json({
+    locked: true,
+    locationNumber,
+    userName: lock.userName,
+    lockedAt: lock.time
+  });
 });
 
-app.get("/api/locks/check/:locationNumber", async (req, res) => {
-  try {
-    const { locationNumber } = req.params;
-    const lock = await checkLock(locationNumber);
+app.delete("/api/locks/unlock/:locationNumber", (req, res) => {
+  const { locationNumber } = req.params;
 
-    if (lock) {
-      res.json({ locked: true, ...lock });
-    } else {
-      res.json({ locked: false });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  LockManager.removeLock(locationNumber);
+
+  res.json({ success: true });
 });
 
-app.get("/api/locks/all", async (req, res) => {
-  try {
-    const locks = await getAllLocks();
-    res.json({ success: true, locks });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+app.get("/api/locks/all", (req, res) => {
+  res.json({
+    success: true,
+    locks: LockManager.getAllLocks()
+  });
 });
 
-// -------------------------------------------------------------
-// Главная
-// -------------------------------------------------------------
+// =====================================================
+// Главная страница
+// =====================================================
+
 app.get("/", (req, res) => {
-  res.send(`
-    ✅ Сервер работает!<br><br>
-    Доступные endpoints:<br>
-    - GET /api/products<br>
-    - GET /api/upload-all-to-sheets<br>
-    - GET /api/inventory/products<br>
-    - POST /api/inventory/save<br>
-  `);
+  res.send("Сервер работает ✔");
 });
 
-// -------------------------------------------------------------
+// =====================================================
+// START SERVER
+// =====================================================
+
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Сервер запущен на порту ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`🚀 Backend запущен на порту ${PORT}`)
+);

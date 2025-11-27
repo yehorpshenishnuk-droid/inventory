@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
-import { 
-  writeProductsToSheet, 
-  readProductsFromSheet, 
+import {
+  writeProductsToSheet,
+  readProductsFromSheet,
   writeQuantitiesToSheet,
   createInventorySheet,
   writeQuantitiesToInventorySheet,
@@ -10,421 +10,298 @@ import {
   readInventorySheetData,
   checkInventorySheetExists,
   sheets,
-  SPREADSHEET_ID,
-  lockLocation,
-  unlockLocation,
-  checkLock,
-  getAllLocks
+  SPREADSHEET_ID
 } from "./googleSheets.js";
+
 import { getPosterProducts, getAllPosterItems } from "./poster.js";
+
+// Новый быстрый механизм блокировок
+import LockManager from "./lockManager.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 📦 Временные тестовые данные (если Poster API недоступен)
+/*  
+   =====================================================
+        POSTER API — получение продуктов
+   =====================================================
+*/
+
 const testProducts = [
   { product_id: 1, product_name: "Кофе", menu_category_name: "Напитки" },
   { product_id: 2, product_name: "Круассан", menu_category_name: "Выпечка" },
   { product_id: 3, product_name: "Сэндвич", menu_category_name: "Закуски" },
 ];
 
-// 📥 API endpoint для получения списка продуктов (для фронтенда)
 app.get("/api/products", async (req, res) => {
   try {
     const products = await getPosterProducts();
-    
-    if (products.length > 0) {
-      console.log("Пример продукта из Poster:", JSON.stringify(products[0], null, 2));
-    }
-    
+
     if (products.length === 0) {
-      console.log("⚠️ Poster API вернул пустой ответ, используем тестовые данные");
       return res.json(testProducts);
     }
-    
+
     res.json(products);
+
   } catch (error) {
-    console.error("Ошибка при получении продуктов:", error);
-    res.status(500).json({ error: "Ошибка при загрузке данных" });
+    res.status(500).json({ error: "Ошибка загрузки продуктов" });
   }
 });
 
-// 📤 API endpoint для выгрузки в Google Sheets
+/*  
+   =====================================================
+        ВЫГРУЗКА ДАННЫХ В GOOGLE SHEETS
+   =====================================================
+*/
+
 app.get("/api/upload-to-sheets", async (req, res) => {
   try {
-    const products = await getPosterProducts();
-    const dataToUpload = products.length > 0 ? products : testProducts;
-    
-    await writeProductsToSheet(dataToUpload);
-    res.json({ 
-      success: true, 
-      message: "✅ Данные успешно выгружены в Google Sheets!",
-      count: dataToUpload.length
+    const items = await getPosterProducts();
+    await writeProductsToSheet(items.length ? items : testProducts);
+
+    res.json({
+      success: true,
+      message: "Данные выгружены",
+      count: items.length
     });
-  } catch (error) {
-    console.error("Ошибка при выгрузке в Google Sheets:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// 📦 API endpoint для выгрузки ВСЕХ позиций (продукты + ингредиенты)
 app.get("/api/upload-all-to-sheets", async (req, res) => {
   try {
-    const allItems = await getAllPosterItems();
-    
-    if (allItems.length === 0) {
-      console.log("⚠️ Не удалось получить данные из Poster");
-      return res.json({ 
-        success: false, 
-        message: "Не удалось получить данные из Poster" 
-      });
+    const all = await getAllPosterItems();
+
+    if (!all.length) {
+      return res.json({ success: false, message: "Нет данных Poster" });
     }
-    
-    await writeProductsToSheet(allItems);
-    res.json({ 
-      success: true, 
-      message: "✅ Все позиции (продукты + ингредиенты) успешно выгружены в Google Sheets!",
-      count: allItems.length
+
+    await writeProductsToSheet(all);
+
+    res.json({
+      success: true,
+      message: "Все позиции выгружены",
+      count: all.length
     });
-  } catch (error) {
-    console.error("Ошибка при выгрузке всех позиций в Google Sheets:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// 🆕 📖 ЧИТАННЯ ДАНИХ З GOOGLE SHEETS (для інвентаризації)
+/*  
+   =====================================================
+        ИНВЕНТАРИЗАЦИЯ
+   =====================================================
+*/
+
 app.get("/api/inventory/products", async (req, res) => {
   try {
     const { date } = req.query;
-    
-    // Якщо передана дата, перевіряємо чи є вже інвентаризація за цю дату
-    if (date) {
-      const exists = await checkInventorySheetExists(date);
-      
-      if (exists) {
-        // Завантажуємо дані з існуючого аркуша
-        const inventoryData = await readInventorySheetData(date);
-        
-        if (inventoryData) {
-          // Групуємо по холодильниках
-          const fridges = {};
-          
-          inventoryData.forEach(product => {
-            const fridgeNum = product.fridge || "Без холодильника";
-            
-            if (!fridges[fridgeNum]) {
-              fridges[fridgeNum] = [];
-            }
-            
-            fridges[fridgeNum].push({
-              name: product.name,
-              category: product.category,
-              type: product.type,
-              unit: product.unit || "кг",
-              currentQuantity: product.quantity || 0,
-              savedQuantity: product.quantity || "", // Збережена кількість
-              rowIndex: product.rowIndex
-            });
-          });
-          
-          const result = Object.keys(fridges).map(fridgeNum => ({
-            fridgeNumber: fridgeNum,
-            products: fridges[fridgeNum]
-          }));
-          
-          console.log(`📋 Відправлено дані існуючої інвентаризації за ${date}`);
-          return res.json({ 
-            data: result, 
-            existingInventory: true,
-            date 
-          });
-        }
+
+    // Если загружаем существующую инвентаризацию
+    if (date && await checkInventorySheetExists(date)) {
+
+      const inventoryData = await readInventorySheetData(date);
+
+      if (inventoryData) {
+        const result = groupInventory(inventoryData);
+        return res.json({
+          data: result,
+          existingInventory: true,
+          date
+        });
       }
     }
-    
-    // Якщо немає існуючої інвентаризації, завантажуємо з головного аркуша
+
+    // Иначе — загрузка по шаблону
     const products = await readProductsFromSheet();
-    
-    const fridges = {};
-    
-    products.forEach(product => {
-      const fridgeNum = product.fridge || "Без холодильника";
-      
-      if (!fridges[fridgeNum]) {
-        fridges[fridgeNum] = [];
-      }
-      
-      fridges[fridgeNum].push({
-        name: product.name,
-        category: product.category,
-        type: product.type,
-        unit: product.unit || "кг",
-        currentQuantity: product.quantity || 0,
-        savedQuantity: "", // Немає збереженої кількості
-        rowIndex: product.rowIndex
-      });
+    const result = groupInventory(products);
+
+    res.json({
+      data: result,
+      existingInventory: false
     });
-    
-    const result = Object.keys(fridges).map(fridgeNum => ({
-      fridgeNumber: fridgeNum,
-      products: fridges[fridgeNum]
-    }));
-    
-    console.log(`📋 Відправлено дані по ${result.length} холодильниках`);
-    res.json({ 
-      data: result, 
-      existingInventory: false 
-    });
-  } catch (error) {
-    console.error("❌ Помилка при читанні даних для інвентаризації:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 🆕 💾 ЗАПИС ЗАЛИШКІВ В GOOGLE SHEETS (НОВИЙ АРКУШ)
+function groupInventory(products) {
+  const fridges = {};
+
+  products.forEach(p => {
+    const num = p.fridge || "Без холодильника";
+    if (!fridges[num]) fridges[num] = [];
+
+    fridges[num].push({
+      name: p.name,
+      category: p.category,
+      type: p.type,
+      unit: p.unit || "кг",
+      currentQuantity: p.quantity || "",
+      savedQuantity: p.quantity || "",
+      rowIndex: p.rowIndex
+    });
+  });
+
+  return Object.keys(fridges).map(n => ({
+    fridgeNumber: n,
+    products: fridges[n]
+  }));
+}
+
+/*  
+   =====================================================
+        СОХРАНЕНИЕ ИНВЕНТАРИЗАЦИИ
+   =====================================================
+*/
+
 app.post("/api/inventory/save", async (req, res) => {
   try {
     const { inventoryData, inventoryDate } = req.body;
-    
-    if (!inventoryData || !Array.isArray(inventoryData)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Невірний формат даних" 
-      });
+
+    if (!inventoryData || !inventoryDate) {
+      return res.status(400).json({ success: false, error: "Неверные данные" });
     }
-    
-    if (!inventoryDate) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Не вказана дата інвентаризації" 
-      });
-    }
-    
-    // Перевіряємо чи вже існує аркуш для цієї дати
-    const exists = await checkInventorySheetExists(inventoryDate);
-    
+
     let sheetName;
-    if (!exists) {
-      // Створюємо новий аркуш (він автоматично скопіює всі заголовки з Лист1)
+
+    if (!await checkInventorySheetExists(inventoryDate)) {
       sheetName = await createInventorySheet(inventoryDate);
     } else {
-      sheetName = `Інвентаризація ${inventoryDate}`;
-      console.log(`📋 Аркуш вже існує: ${sheetName}`);
+      sheetName = `Инвентаризация ${inventoryDate}`;
     }
-    
-    // Готуємо дані по холодильниках
-    const inventoryByFridge = {};
-    
+
+    // Формируем данные по холодильникам
+    const dataByFridge = {};
     inventoryData.forEach(fridge => {
-      inventoryByFridge[fridge.fridgeNumber] = fridge.products.map(p => ({
-        name: p.name,
-        quantity: p.quantity
-      }));
+      dataByFridge[fridge.fridgeNumber] =
+        fridge.products.map(p => ({
+          name: p.name,
+          quantity: p.quantity
+        }));
     });
-    
-    // ✅ ПЕРЕЗАПИСУЄМО значення (користувач сам додає через +)
-    await writeQuantitiesToInventorySheet(sheetName, inventoryByFridge);
-    
-    res.json({ 
-      success: true, 
-      message: `✅ Інвентаризацію успішно збережено в аркуш "${sheetName}"!`,
+
+    await writeQuantitiesToInventorySheet(sheetName, dataByFridge);
+
+    res.json({
+      success: true,
+      message: "Инвентаризация сохранена",
       sheetName
     });
-  } catch (error) {
-    console.error("❌ Помилка при збереженні залишків:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// 🆕 СТВОРИТИ АРКУШ ПРИ ВИБОРІ ДАТИ
-app.post("/api/inventory/init-sheet", async (req, res) => {
-  try {
-    const { inventoryDate } = req.body;
-    
-    if (!inventoryDate) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Не вказана дата інвентаризації" 
-      });
-    }
-    
-    // Перевіряємо чи вже існує
-    const exists = await checkInventorySheetExists(inventoryDate);
-    
-    let sheetName;
-    if (!exists) {
-      // Створюємо новий аркуш
-      sheetName = await createInventorySheet(inventoryDate);
-      console.log(`✅ Створено новий аркуш: ${sheetName}`);
-    } else {
-      sheetName = `Інвентаризація ${inventoryDate}`;
-      console.log(`ℹ️ Аркуш вже існує: ${sheetName}`);
-    }
-    
-    res.json({ 
-      success: true, 
-      sheetName,
-      existed: exists
-    });
-  } catch (error) {
-    console.error("❌ Помилка при створенні аркуша:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
+/*  
+   =====================================================
+        PDF EXPORT
+   (оставлено как у вас — можно улучшить позже)
+   =====================================================
+*/
 
-// 📥 ЕКСПОРТ АРКУША В PDF
 app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
   try {
     const sheetName = decodeURIComponent(req.params.sheetName);
-    
-    console.log(`📄 Запит на експорт PDF для аркуша: ${sheetName}`);
-    
-    // Отримуємо ID аркуша
+
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID
     });
-    
+
     const sheet = spreadsheet.data.sheets.find(
       s => s.properties.title === sheetName
     );
-    
+
     if (!sheet) {
-      return res.status(404).json({ 
-        success: false, 
-        error: `Аркуш "${sheetName}" не знайдено` 
-      });
+      return res.status(404).json({ success: false, error: "Лист не найден" });
     }
-    
-    const sheetId = sheet.properties.sheetId;
-    
-    // Формуємо URL для експорту PDF
-    // Використовуємо той самий credentials що і для API
-    const exportUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=pdf&gid=${sheetId}&portrait=false&fitw=true`;
-    
-    console.log(`✅ Генерую посилання на PDF: ${exportUrl}`);
-    
-    // Повертаємо інформацію для фронтенду
-    res.json({ 
-      success: true, 
+
+    const gid = sheet.properties.sheetId;
+
+    const exportUrl =
+      `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}` +
+      `/export?format=pdf&gid=${gid}&portrait=false&fitw=true`;
+
+    res.json({
+      success: true,
       downloadUrl: exportUrl,
-      sheetName: sheetName,
-      message: "PDF готовий до завантаження"
+      sheetName
     });
-    
-  } catch (error) {
-    console.error("❌ Помилка при експорті PDF:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// 🔒 API ДЛЯ БЛОКУВАНЬ
+/*  
+   =====================================================
+        НОВЫЕ БЫСТРЫЕ БЛОКИРОВКИ
+   =====================================================
+*/
 
-// Заблокувати холодильник/стелаж
-app.post("/api/locks/lock", async (req, res) => {
-  try {
-    const { locationNumber, userName } = req.body;
-    
-    if (!locationNumber || !userName) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Не вказано номер або ім'я користувача" 
-      });
-    }
-    
-    const result = await lockLocation(locationNumber, userName);
-    res.json(result);
-  } catch (error) {
-    console.error("❌ Помилка блокування:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+// Заблокировать стеллаж/холодильник
+app.post("/api/locks/lock", (req, res) => {
+  const { locationNumber, userName } = req.body;
+
+  if (!locationNumber || !userName) {
+    return res.status(400).json({ success: false, error: "Нет данных" });
+  }
+
+  const existing = LockManager.getLock(locationNumber);
+
+  if (existing) {
+    return res.json({
+      success: false,
+      error: `Стеллаж уже открыт пользователем ${existing.userName}`
     });
   }
+
+  LockManager.setLock(locationNumber, userName);
+  return res.json({ success: true });
 });
 
-// Розблокувати холодильник/стелаж
-app.delete("/api/locks/unlock/:locationNumber", async (req, res) => {
-  try {
-    const { locationNumber } = req.params;
-    const result = await unlockLocation(locationNumber);
-    res.json(result);
-  } catch (error) {
-    console.error("❌ Помилка розблокування:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
+// Проверить
+app.get("/api/locks/check/:locationNumber", (req, res) => {
+  const lock = LockManager.getLock(req.params.locationNumber);
+
+  if (!lock) return res.json({ locked: false });
+
+  return res.json({
+    locked: true,
+    userName: lock.userName
+  });
 });
 
-// Перевірити блокування конкретного холодильника
-app.get("/api/locks/check/:locationNumber", async (req, res) => {
-  try {
-    const { locationNumber } = req.params;
-    const lock = await checkLock(locationNumber);
-    
-    if (lock) {
-      res.json({ 
-        locked: true, 
-        ...lock 
-      });
-    } else {
-      res.json({ locked: false });
-    }
-  } catch (error) {
-    console.error("❌ Помилка перевірки:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
+// Разблокировать
+app.delete("/api/locks/unlock/:locationNumber", (req, res) => {
+  LockManager.removeLock(req.params.locationNumber);
+  return res.json({ success: true });
 });
 
-// Отримати всі блокування
-app.get("/api/locks/all", async (req, res) => {
-  try {
-    const locks = await getAllLocks();
-    res.json({ success: true, locks });
-  } catch (error) {
-    console.error("❌ Помилка отримання блокувань:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
+// Все блокировки
+app.get("/api/locks/all", (req, res) => {
+  res.json({
+    success: true,
+    locks: LockManager.getAllLocks()
+  });
 });
 
-// 🏠 Главная страница
+/*  
+   =====================================================
+        СТАРТ СЕРВЕРА
+   =====================================================
+*/
+
 app.get("/", (req, res) => {
-  res.send(`
-    ✅ Сервер працює!<br><br>
-    Доступні endpoints:<br>
-    - GET /api/products - отримати продукти з Poster<br>
-    - GET /api/upload-to-sheets - завантажити продукти в Sheets<br>
-    - GET /api/upload-all-to-sheets - завантажити всі позиції в Sheets<br>
-    - GET /api/inventory/products - отримати продукти для інвентаризації (по холодильниках)<br>
-    - POST /api/inventory/save - зберегти залишки в Google Sheets
-  `);
+  res.send("Сервер работает");
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Сервер запущений на порту ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Сервер запущен на порту ${PORT}`));

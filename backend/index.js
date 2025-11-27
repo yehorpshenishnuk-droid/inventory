@@ -1218,32 +1218,6 @@ app.get("/", (req, res) => {
     - GET /api/locks/check/:locationNumber - перевірити блокування<br>
     - GET /api/locks/all - всі блокування
   `);
-});ює!<br><br>
-    <strong>Доступні endpoints:</strong><br><br>
-    📦 <strong>Poster API:</strong><br>
-    - GET /api/products - отримати продукти з Poster<br><br>
-    
-    📤 <strong>Виведення в Google Sheets:</strong><br>
-    - GET /api/upload-to-sheets - завантажити продукти<br>
-    - GET /api/upload-all-to-sheets - завантажити всі позиції<br>
-    - GET /api/upload-prepacks-to-sheets - завантажити НАПІВФАБРИКАТИ з ID<br>
-    - GET /api/sync-prepacks - СИНХРОНІЗУВАТИ напівфабрикати (оновити зміни)<br><br>
-    
-    🔢 <strong>Формули та ID:</strong><br>
-    - GET /api/add-id-formulas - 🆕 <strong>додати формули ВПР для ID напівфабрикатів</strong><br>
-    - GET /api/update-id-formulas - 🆕 <strong>оновити формули після змін</strong><br><br>
-    
-    📋 <strong>Інвентаризація:</strong><br>
-    - GET /api/inventory/products - отримати продукти для інвентаризації<br>
-    - POST /api/inventory/save - зберегти залишки<br>
-    - GET /api/inventory/export-pdf/:sheetName - експорт в PDF<br><br>
-    
-    🔒 <strong>Блокування:</strong><br>
-    - POST /api/locks/lock - заблокувати локацію<br>
-    - DELETE /api/locks/unlock/:locationNumber - розблокувати<br>
-    - GET /api/locks/check/:locationNumber - перевірити блокування<br>
-    - GET /api/locks/all - всі блокування
-  `);
 });
 
 // =====================================================

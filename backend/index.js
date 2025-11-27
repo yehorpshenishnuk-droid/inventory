@@ -175,6 +175,193 @@ app.get("/api/upload-prepacks-to-sheets", async (req, res) => {
 });
 
 // =====================================================
+// СИНХРОНИЗАЦИЯ ПОЛУФАБРИКАТОВ (обновление изменений)
+// =====================================================
+
+app.get("/api/sync-prepacks", async (req, res) => {
+  try {
+    const SHEET_NAME = "Напівфабрикати";
+    
+    // Получаем актуальные данные из Poster
+    const posterPrepacks = await getPosterPrepacks();
+    
+    if (!posterPrepacks || posterPrepacks.length === 0) {
+      return res.json({ 
+        success: false, 
+        message: "Не вдалося отримати дані з Poster" 
+      });
+    }
+    
+    // Создаем Map для быстрого поиска по ID
+    const posterMap = new Map();
+    posterPrepacks.forEach(p => {
+      posterMap.set(String(p.product_id), p.product_name);
+    });
+    
+    // Проверяем существует ли лист
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const sheetExists = spreadsheet.data.sheets.find(
+      s => s.properties.title === SHEET_NAME
+    );
+    
+    // Если листа нет - создаем и выгружаем всё
+    if (!sheetExists) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: { properties: { title: SHEET_NAME } }
+          }]
+        }
+      });
+      
+      // Заголовки
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${SHEET_NAME}!A1:C1`,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [["ID", "Назва", "Тип"]]
+        }
+      });
+      
+      // Все данные
+      const values = posterPrepacks.map(p => [
+        p.product_id,
+        p.product_name,
+        "Напівфабрикат"
+      ]);
+      
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${SHEET_NAME}!A2`,
+        valueInputOption: "RAW",
+        requestBody: { values }
+      });
+      
+      return res.json({
+        success: true,
+        message: `✅ Створено аркуш і додано ${posterPrepacks.length} напівфабрикатів`,
+        added: posterPrepacks.length,
+        updated: 0,
+        deleted: 0
+      });
+    }
+    
+    // Читаем существующие данные из таблицы
+    const sheetData = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A2:C`
+    });
+    
+    const rows = sheetData.data.values || [];
+    
+    // Создаем Map существующих записей (ID -> {name, rowIndex})
+    const sheetMap = new Map();
+    rows.forEach((row, index) => {
+      if (row[0]) { // Если есть ID
+        sheetMap.set(String(row[0]), {
+          name: row[1] || "",
+          rowIndex: index + 2
+        });
+      }
+    });
+    
+    const updates = [];
+    let addedCount = 0;
+    let updatedCount = 0;
+    let deletedCount = 0;
+    
+    // 1. Обновляем существующие и находим новые
+    for (const [id, newName] of posterMap) {
+      if (sheetMap.has(id)) {
+        // Запись существует - проверяем изменилось ли название
+        const existing = sheetMap.get(id);
+        if (existing.name !== newName) {
+          updates.push({
+            range: `${SHEET_NAME}!B${existing.rowIndex}`,
+            values: [[newName]]
+          });
+          updatedCount++;
+        }
+      } else {
+        // Новая запись - добавим в конец
+        addedCount++;
+      }
+    }
+    
+    // Применяем обновления названий
+    if (updates.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: updates
+        }
+      });
+    }
+    
+    // 2. Добавляем новые записи
+    if (addedCount > 0) {
+      const newRows = [];
+      for (const [id, name] of posterMap) {
+        if (!sheetMap.has(id)) {
+          newRows.push([id, name, "Напівфабрикат"]);
+        }
+      }
+      
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${SHEET_NAME}!A:C`,
+        valueInputOption: "RAW",
+        requestBody: { values: newRows }
+      });
+    }
+    
+    // 3. Помечаем удаленные (которые есть в таблице, но нет в Poster)
+    const deletedRows = [];
+    for (const [id, data] of sheetMap) {
+      if (!posterMap.has(id)) {
+        deletedRows.push({
+          range: `${SHEET_NAME}!C${data.rowIndex}`,
+          values: [["❌ Видалено з Poster"]]
+        });
+        deletedCount++;
+      }
+    }
+    
+    if (deletedRows.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: deletedRows
+        }
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: `✅ Синхронізація завершена`,
+      added: addedCount,
+      updated: updatedCount,
+      deleted: deletedCount,
+      total: posterPrepacks.length
+    });
+    
+  } catch (err) {
+    console.error("Ошибка синхронизации:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message 
+    });
+  }
+});
+
+// =====================================================
 // ИНВЕНТАРИЗАЦИЯ — ЧТЕНИЕ
 // =====================================================
 
@@ -393,7 +580,8 @@ app.get("/", (req, res) => {
     📤 <strong>Виведення в Google Sheets:</strong><br>
     - GET /api/upload-to-sheets - завантажити продукти<br>
     - GET /api/upload-all-to-sheets - завантажити всі позиції<br>
-    - GET /api/upload-prepacks-to-sheets - 🆕 <strong>завантажити НАПІВФАБРИКАТИ з ID</strong><br><br>
+    - GET /api/upload-prepacks-to-sheets - завантажити НАПІВФАБРИКАТИ з ID<br>
+    - GET /api/sync-prepacks - 🆕 <strong>СИНХРОНІЗУВАТИ напівфабрикати (оновити зміни)</strong><br><br>
     
     📋 <strong>Інвентаризація:</strong><br>
     - GET /api/inventory/products - отримати продукти для інвентаризації<br>

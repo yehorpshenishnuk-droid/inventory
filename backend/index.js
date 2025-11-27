@@ -1,34 +1,34 @@
 import express from "express";
 import cors from "cors";
+
 import {
   writeProductsToSheet,
   readProductsFromSheet,
   writeQuantitiesToSheet,
   createInventorySheet,
   writeQuantitiesToInventorySheet,
-  addQuantitiesToInventorySheet,
   readInventorySheetData,
   checkInventorySheetExists,
   sheets,
   SPREADSHEET_ID
 } from "./googleSheets.js";
 
-import { getPosterProducts, getAllPosterItems } from "./poster.js";
+import { 
+  getPosterProducts, 
+  getAllPosterItems 
+} from "./poster.js";
 
-// Новый быстрый механизм блокировок
 import LockManager from "./lockManager.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/*  
-   =====================================================
-        POSTER API — получение продуктов
-   =====================================================
-*/
+// =====================================================
+// POSTER API — получение продуктов
+// =====================================================
 
-const testProducts = [
+const fallbackProducts = [
   { product_id: 1, product_name: "Кофе", menu_category_name: "Напитки" },
   { product_id: 2, product_name: "Круассан", menu_category_name: "Выпечка" },
   { product_id: 3, product_name: "Сэндвич", menu_category_name: "Закуски" },
@@ -38,36 +38,35 @@ app.get("/api/products", async (req, res) => {
   try {
     const products = await getPosterProducts();
 
-    if (products.length === 0) {
-      return res.json(testProducts);
+    if (!products || products.length === 0) {
+      return res.json(fallbackProducts);
     }
 
     res.json(products);
-
-  } catch (error) {
+  } catch (err) {
     res.status(500).json({ error: "Ошибка загрузки продуктов" });
   }
 });
 
-/*  
-   =====================================================
-        ВЫГРУЗКА ДАННЫХ В GOOGLE SHEETS
-   =====================================================
-*/
+// =====================================================
+// ВЫГРУЗКА В GOOGLE SHEETS
+// =====================================================
 
 app.get("/api/upload-to-sheets", async (req, res) => {
   try {
-    const items = await getPosterProducts();
-    await writeProductsToSheet(items.length ? items : testProducts);
+    const posterData = await getPosterProducts();
+    const data = posterData.length ? posterData : fallbackProducts;
+
+    await writeProductsToSheet(data);
 
     res.json({
       success: true,
-      message: "Данные выгружены",
-      count: items.length
+      count: data.length,
+      message: "Данные выгружены"
     });
 
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -87,42 +86,39 @@ app.get("/api/upload-all-to-sheets", async (req, res) => {
       count: all.length
     });
 
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/*  
-   =====================================================
-        ИНВЕНТАРИЗАЦИЯ
-   =====================================================
-*/
+// =====================================================
+// ИНВЕНТАРИЗАЦИЯ — ЧТЕНИЕ
+// =====================================================
 
 app.get("/api/inventory/products", async (req, res) => {
   try {
     const { date } = req.query;
 
-    // Если загружаем существующую инвентаризацию
+    // Если есть существующий лист — читаем его
     if (date && await checkInventorySheetExists(date)) {
-
       const inventoryData = await readInventorySheetData(date);
 
       if (inventoryData) {
-        const result = groupInventory(inventoryData);
+        const grouped = groupInventory(inventoryData);
         return res.json({
-          data: result,
+          data: grouped,
           existingInventory: true,
           date
         });
       }
     }
 
-    // Иначе — загрузка по шаблону
+    // Иначе читаем шаблон Лист1
     const products = await readProductsFromSheet();
-    const result = groupInventory(products);
+    const grouped = groupInventory(products);
 
     res.json({
-      data: result,
+      data: grouped,
       existingInventory: false
     });
 
@@ -131,42 +127,45 @@ app.get("/api/inventory/products", async (req, res) => {
   }
 });
 
+// Группировка по холодильникам
 function groupInventory(products) {
   const fridges = {};
 
-  products.forEach(p => {
-    const num = p.fridge || "Без холодильника";
-    if (!fridges[num]) fridges[num] = [];
+  products.forEach(item => {
+    const loc = item.fridge || "Без холодильника";
 
-    fridges[num].push({
-      name: p.name,
-      category: p.category,
-      type: p.type,
-      unit: p.unit || "кг",
-      currentQuantity: p.quantity || "",
-      savedQuantity: p.quantity || "",
-      rowIndex: p.rowIndex
+    if (!fridges[loc]) fridges[loc] = [];
+
+    fridges[loc].push({
+      name: item.name,
+      category: item.category,
+      type: item.type,
+      unit: item.unit || "кг",
+      currentQuantity: item.quantity || "",
+      savedQuantity: item.quantity || "",
+      rowIndex: item.rowIndex
     });
   });
 
-  return Object.keys(fridges).map(n => ({
-    fridgeNumber: n,
-    products: fridges[n]
+  return Object.keys(fridges).map(loc => ({
+    fridgeNumber: loc,
+    products: fridges[loc]
   }));
 }
 
-/*  
-   =====================================================
-        СОХРАНЕНИЕ ИНВЕНТАРИЗАЦИИ
-   =====================================================
-*/
+// =====================================================
+// ИНВЕНТАРИЗАЦИЯ — СОХРАНЕНИЕ
+// =====================================================
 
 app.post("/api/inventory/save", async (req, res) => {
   try {
     const { inventoryData, inventoryDate } = req.body;
 
     if (!inventoryData || !inventoryDate) {
-      return res.status(400).json({ success: false, error: "Неверные данные" });
+      return res.status(400).json({
+        success: false,
+        error: "Некорректные данные"
+      });
     }
 
     let sheetName;
@@ -174,17 +173,16 @@ app.post("/api/inventory/save", async (req, res) => {
     if (!await checkInventorySheetExists(inventoryDate)) {
       sheetName = await createInventorySheet(inventoryDate);
     } else {
-      sheetName = `Инвентаризация ${inventoryDate}`;
+      sheetName = `Інвентаризація ${inventoryDate}`;
     }
 
-    // Формируем данные по холодильникам
     const dataByFridge = {};
+
     inventoryData.forEach(fridge => {
-      dataByFridge[fridge.fridgeNumber] =
-        fridge.products.map(p => ({
-          name: p.name,
-          quantity: p.quantity
-        }));
+      dataByFridge[fridge.fridgeNumber] = fridge.products.map(item => ({
+        name: item.name,
+        quantity: item.quantity
+      }));
     });
 
     await writeQuantitiesToInventorySheet(sheetName, dataByFridge);
@@ -195,17 +193,14 @@ app.post("/api/inventory/save", async (req, res) => {
       sheetName
     });
 
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/*  
-   =====================================================
-        PDF EXPORT
-   (оставлено как у вас — можно улучшить позже)
-   =====================================================
-*/
+// =====================================================
+// PDF EXPORT
+// =====================================================
 
 app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
   try {
@@ -220,14 +215,16 @@ app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
     );
 
     if (!sheet) {
-      return res.status(404).json({ success: false, error: "Лист не найден" });
+      return res.status(404).json({
+        success: false,
+        error: "Лист не найден"
+      });
     }
 
     const gid = sheet.properties.sheetId;
 
     const exportUrl =
-      `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}` +
-      `/export?format=pdf&gid=${gid}&portrait=false&fitw=true`;
+      `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=pdf&gid=${gid}&portrait=false&fitw=true`;
 
     res.json({
       success: true,
@@ -235,57 +232,63 @@ app.get("/api/inventory/export-pdf/:sheetName", async (req, res) => {
       sheetName
     });
 
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/*  
-   =====================================================
-        НОВЫЕ БЫСТРЫЕ БЛОКИРОВКИ
-   =====================================================
-*/
+// =====================================================
+// БЫСТРЫЕ БЛОКИРОВКИ (в памяти)
+// =====================================================
 
-// Заблокировать стеллаж/холодильник
 app.post("/api/locks/lock", (req, res) => {
   const { locationNumber, userName } = req.body;
 
   if (!locationNumber || !userName) {
-    return res.status(400).json({ success: false, error: "Нет данных" });
+    return res.status(400).json({
+      success: false,
+      error: "Нет данных"
+    });
   }
 
-  const existing = LockManager.getLock(locationNumber);
+  const exists = LockManager.getLock(locationNumber);
 
-  if (existing) {
+  if (exists) {
     return res.json({
       success: false,
-      error: `Стеллаж уже открыт пользователем ${existing.userName}`
+      error: `Стеллаж/холодильник уже открыт пользователем ${exists.userName}`
     });
   }
 
   LockManager.setLock(locationNumber, userName);
-  return res.json({ success: true });
+  res.json({ success: true });
 });
 
-// Проверить
 app.get("/api/locks/check/:locationNumber", (req, res) => {
-  const lock = LockManager.getLock(req.params.locationNumber);
+  const { locationNumber } = req.params;
 
-  if (!lock) return res.json({ locked: false });
+  const lock = LockManager.getLock(locationNumber);
 
-  return res.json({
+  if (!lock) {
+    return res.json({ locked: false });
+  }
+
+  res.json({
     locked: true,
-    userName: lock.userName
+    locationNumber,
+    userName: lock.userName,
+    lockedAt: lock.time
   });
 });
 
-// Разблокировать
 app.delete("/api/locks/unlock/:locationNumber", (req, res) => {
-  LockManager.removeLock(req.params.locationNumber);
-  return res.json({ success: true });
+  const { locationNumber } = req.params;
+
+  LockManager.removeLock(locationNumber);
+
+  res.json({ success: true });
 });
 
-// Все блокировки
 app.get("/api/locks/all", (req, res) => {
   res.json({
     success: true,
@@ -293,15 +296,19 @@ app.get("/api/locks/all", (req, res) => {
   });
 });
 
-/*  
-   =====================================================
-        СТАРТ СЕРВЕРА
-   =====================================================
-*/
+// =====================================================
+// Главная страница
+// =====================================================
 
 app.get("/", (req, res) => {
-  res.send("Сервер работает");
+  res.send("Сервер работает ✔");
 });
 
+// =====================================================
+// START SERVER
+// =====================================================
+
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Сервер запущен на порту ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`🚀 Backend запущен на порту ${PORT}`)
+);

@@ -481,7 +481,7 @@
     <!-- Екран списку продуктів -->
     <div id="product-list">
       <div class="top-buttons">
-        <button class="back-btn" onclick="saveCurrentFridge()">← Назад</button>
+        <button class="back-btn" onclick="showFridgeSelector()">← Назад</button>
       </div>
       <h2 id="current-fridge-title"></h2>
       
@@ -523,6 +523,13 @@
     let isExistingInventory = false;
     let currentUserName = ""; // Ім'я поточного користувача
     
+    // 🆕 КЕШ ДАНИХ для оптимізації
+    let dataCache = {
+      lastFetch: null,
+      data: null
+    };
+    const CACHE_DURATION = 30000; // 30 секунд
+    
     // Визначення типу холодильника/стелажа
     const SHELVES = ['3', '4', '8', '16']; // Номери стелажів
     
@@ -536,12 +543,8 @@
 
     // Перевірка авторизації
     function checkAuth() {
-      console.log("🔐 checkAuth викликано");
-      
       const code = document.getElementById("auth-code").value;
       const userName = document.getElementById("user-name").value.trim();
-      
-      console.log("Код:", code, "Ім'я:", userName);
       
       if (!userName) {
         document.getElementById("auth-error").textContent = "Будь ласка, введіть ваше ім'я";
@@ -550,7 +553,6 @@
       }
       
       if (code === AUTH_CODE) {
-        console.log("✅ Авторизація успішна!");
         currentUserName = userName;
         localStorage.setItem("userName", userName); // Зберігаємо ім'я
         
@@ -559,7 +561,6 @@
         // Встановлюємо сьогоднішню дату
         document.getElementById("inventory-date").valueAsDate = new Date();
       } else {
-        console.log("❌ Невірний код");
         document.getElementById("auth-error").textContent = "Невірний код";
         document.getElementById("auth-error").style.display = "block";
       }
@@ -569,27 +570,13 @@
     window.addEventListener("DOMContentLoaded", () => {
       const savedName = localStorage.getItem("userName");
       if (savedName) {
-        const userNameInput = document.getElementById("user-name");
-        if (userNameInput) {
-          userNameInput.value = savedName;
-        }
+        document.getElementById("user-name").value = savedName;
       }
-      
-      // Enter для авторизації
-      const authCodeInput = document.getElementById("auth-code");
-      const userNameInput = document.getElementById("user-name");
-      
-      if (authCodeInput) {
-        authCodeInput.addEventListener("keypress", (e) => {
-          if (e.key === "Enter") checkAuth();
-        });
-      }
-      
-      if (userNameInput) {
-        userNameInput.addEventListener("keypress", (e) => {
-          if (e.key === "Enter") checkAuth();
-        });
-      }
+    });
+
+    // Enter для авторизації
+    document.getElementById("auth-code")?.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") checkAuth();
     });
 
     // Початок інвентаризації
@@ -699,6 +686,10 @@
       inventoryDate = dateInput;
       document.getElementById("date-modal").classList.remove("active");
       
+      // 🆕 СКИДАЄМО КЕШ при виборі нової дати
+      dataCache.lastFetch = null;
+      dataCache.data = null;
+      
       // ✅ СТВОРЮЄМО АРКУШ ОДРАЗУ ПРИ ВИБОРІ ДАТИ
       try {
         const response = await fetch(`${API_URL}/api/inventory/init-sheet`, {
@@ -738,6 +729,11 @@
         
         allFridges = result.data || result;
         isExistingInventory = result.existingInventory || false;
+        
+        // 🆕 ЗБЕРІГАЄМО ДАНІ В КЕШ ОДРАЗУ!
+        dataCache.data = allFridges;
+        dataCache.lastFetch = Date.now();
+        console.log("✅ Дані завантажено та збережено в кеш");
         
         if (isExistingInventory) {
           // Якщо існує інвентаризація за цю дату, завантажуємо збережені дані
@@ -783,11 +779,12 @@
       const selector = document.getElementById("fridge-selector");
       selector.innerHTML = "";
       
-      // ✅ Рендеримо спочатку БЕЗ перевірки блокувань (швидко)
+      // Отримуємо всі блокування
+      const locks = await getAllLocationLocks();
+      
       allFridges.forEach(fridge => {
         const card = document.createElement("div");
         card.className = "fridge-card";
-        card.setAttribute("data-fridge", fridge.fridgeNumber);
         
         const hasData = inventoryData[fridge.fridgeNumber] && 
                         inventoryData[fridge.fridgeNumber].some(p => p.quantity !== "");
@@ -796,12 +793,16 @@
           card.classList.add("selected");
         }
         
+        // Перевіряємо чи заблокований
+        const lock = locks[fridge.fridgeNumber];
+        const isLockedByOther = lock && lock.userName !== currentUserName;
+        
         card.innerHTML = `
           <div class="fridge-icon">${getFridgeIcon(fridge.fridgeNumber)}</div>
           <div class="fridge-number">${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}</div>
           <div class="fridge-count">${fridge.products.length} позицій</div>
           ${hasData ? '<div style="margin-top: 10px;">✅ Заповнено</div>' : ''}
-          <div class="lock-status"></div>
+          ${isLockedByOther ? `<div style="margin-top: 10px; color: #ef4444;">🔒 Рахує: ${lock.userName}</div>` : ''}
         `;
         
         card.onclick = () => showProducts(fridge);
@@ -816,25 +817,11 @@
         saveAllBtn.onclick = checkAndSaveAll;
         selector.appendChild(saveAllBtn);
       }
-      
-      // ⚡ Завантажуємо блокування АСИНХРОННО (не блокує UI)
-      getAllLocationLocks().then(locks => {
-        allFridges.forEach(fridge => {
-          const lock = locks[fridge.fridgeNumber];
-          const isLockedByOther = lock && lock.userName !== currentUserName;
-          
-          if (isLockedByOther) {
-            const card = selector.querySelector(`[data-fridge="${fridge.fridgeNumber}"]`);
-            if (card) {
-              const lockStatus = card.querySelector('.lock-status');
-              lockStatus.innerHTML = `<div style="margin-top: 10px; color: #ef4444;">🔒 Рахує: ${lock.userName}</div>`;
-            }
-          }
-        });
-      });
     }
 
-Відкриваю холодильник:", fridge.fridgeNumber);
+    // Показати продукти холодильника
+    async function showProducts(fridge) {
+      console.log("📂 Відкриваю холодильник:", fridge.fridgeNumber);
       
       // Перевіряємо блокування
       const lock = await checkLocationLock(fridge.fridgeNumber);
@@ -852,7 +839,69 @@
         return;
       }
       
-      // ✅ Використовуємо вже завантажені дані (НЕ перезавантажуємо з сервера)
+      // 🔄 ЗАВАНТАЖУЄМО СВІЖІ ДАНІ ТІЛЬКИ ЯКЩО КЕШ ЗАСТАРІВ
+      const now = Date.now();
+      const cacheValid = dataCache.lastFetch && (now - dataCache.lastFetch) < CACHE_DURATION;
+      
+      if (!cacheValid || !dataCache.data) {
+        console.log("🔄 Завантажую свіжі дані (кеш застарів або відсутній)");
+        
+        try {
+          const response = await fetch(`${API_URL}/api/inventory/products?date=${inventoryDate}`);
+          const result = await response.json();
+          
+          if (result.data) {
+            dataCache.data = result.data;
+            dataCache.lastFetch = now;
+            console.log("✅ Кеш оновлено");
+          }
+        } catch (error) {
+          console.error("❌ Помилка завантаження даних:", error);
+          // Продовжуємо роботу навіть якщо не вдалося оновити
+        }
+      } else {
+        console.log("⚡ Використовую дані з кешу (економлю час)");
+      }
+      
+      // Використовуємо кешовані дані
+      if (dataCache.data) {
+        const freshFridgeData = dataCache.data.find(f => f.fridgeNumber === fridge.fridgeNumber);
+        
+        if (freshFridgeData && freshFridgeData.products) {
+          fridge.products = freshFridgeData.products;
+          
+          const index = allFridges.findIndex(f => f.fridgeNumber === fridge.fridgeNumber);
+          if (index >= 0) {
+            allFridges[index].products = freshFridgeData.products;
+          }
+          
+          // Оновлюємо inventoryData зі збереженими даними
+          const productsWithData = freshFridgeData.products.filter(p => p.savedQuantity && p.savedQuantity !== "");
+          
+          if (productsWithData.length > 0) {
+            if (!inventoryData[fridge.fridgeNumber]) {
+              inventoryData[fridge.fridgeNumber] = [];
+            }
+            
+            productsWithData.forEach(serverProduct => {
+              const existingIndex = inventoryData[fridge.fridgeNumber].findIndex(p => p.name === serverProduct.name);
+              
+              if (existingIndex >= 0) {
+                inventoryData[fridge.fridgeNumber][existingIndex].quantity = serverProduct.savedQuantity;
+                console.log("♻️ Оновлено:", serverProduct.name, "=", serverProduct.savedQuantity);
+              } else {
+                inventoryData[fridge.fridgeNumber].push({
+                  name: serverProduct.name,
+                  quantity: serverProduct.savedQuantity
+                });
+                console.log("➕ Додано:", serverProduct.name, "=", serverProduct.savedQuantity);
+              }
+            });
+          }
+        }
+        
+        console.log("✅ Оновлено дані для холодильника", fridge.fridgeNumber);
+      }
       
       currentFridge = fridge;
       currentProducts = fridge.products;
@@ -1089,6 +1138,9 @@
         
         if (result.success) {
           console.log("✅ Збережено в Google Sheets");
+          // 🆕 Скидаємо кеш щоб при наступному відкритті завантажились свіжі дані
+          dataCache.lastFetch = null;
+          dataCache.data = null;
         } else {
           console.error("❌ Помилка збереження:", result.error);
         }
@@ -1231,6 +1283,10 @@
         
         if (result.success) {
           // Показуємо модальне вікно з кнопкою завантаження PDF
+          // 🆕 Скидаємо кеш
+          dataCache.lastFetch = null;
+          dataCache.data = null;
+          
           const modalHtml = `
             <div style="text-align: center;">
               <h2 style="color: #10b981; margin-bottom: 20px;">✅ Інвентаризацію успішно збережено!</h2>

@@ -92,6 +92,7 @@ export async function getPosterProducts() {
   return data.response.map(item => ({
     product_id: item.product_id,
     product_name: item.product_name,
+    category_id: item.menu_category_id, // ID категории
     category_name: categories[item.menu_category_id] || item.category_name || "-",
     item_type: String(item.type) // 2 = техкарта, 3 = продукт
   }));
@@ -134,6 +135,7 @@ export async function getPosterIngredients() {
   return data.response.map(item => ({
     ingredient_id: item.ingredient_id,
     ingredient_name: item.ingredient_name,
+    category_id: item.category_id, // ID категории
     category_name: categories[item.category_id] || "-"
   }));
 }
@@ -145,20 +147,8 @@ export async function getPosterIngredients() {
 export async function getAllPosterItems() {
   console.log("📡 Загружаю данные из Poster...");
 
-  // Категории БАРа и напитков - НЕ выгружаем
-  const EXCLUDED_CATEGORIES = [
-    "АЛКОГОЛЬ",
-    "Алкогольні коктейлі",
-    "ВИНО",
-    "БОКАЛ ВИНА",
-    "ПИВО",
-    "ХОЛОДНІ НАПОЇ",
-    "ЧАЙ / КОФЕ",
-    "ДОПИ БАР",
-    "Кава на Безлактозному",
-    "КАВА ПЕРСОНАЛ",
-    "ДОПИ"
-  ];
+  // ID категорий БАРа - НЕ выгружаем
+  const BAR_CATEGORIES = [9, 14, 27, 28, 34, 41, 42, 47, 22, 24, 25, 26, 39, 30];
 
   const [products, prepacks, ingredients] = await Promise.all([
     getPosterProducts(),
@@ -171,14 +161,19 @@ export async function getAllPosterItems() {
   const techCards = [];
 
   products.forEach(item => {
-    // Пропускаем категории бара и напитков
-    if (EXCLUDED_CATEGORIES.includes(item.category_name)) {
+    // Пропускаем категории бара по ID
+    if (BAR_CATEGORIES.includes(Number(item.category_id))) {
       return;
     }
     
     if (item.item_type === "2") techCards.push(item);
     else regularProducts.push(item);
   });
+
+  // Фильтруем ингредиенты - убираем бар по ID
+  const filteredIngredients = ingredients.filter(i => 
+    !BAR_CATEGORIES.includes(Number(i.category_id))
+  );
 
   const allItems = [
     ...regularProducts.map(p => ({
@@ -202,7 +197,7 @@ export async function getAllPosterItems() {
       type: "Напівфабрикат"
     })),
 
-    ...ingredients.map(i => ({
+    ...filteredIngredients.map(i => ({
       id: i.ingredient_id,
       name: i.ingredient_name,
       category: i.category_name,

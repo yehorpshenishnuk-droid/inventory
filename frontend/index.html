@@ -452,7 +452,30 @@
         <h2>📅 Дата інвентаризації</h2>
         <p style="color: #666; margin-bottom: 20px;">Введіть дату проведення інвентаризації</p>
         <input type="date" id="inventory-date" />
-        <button onclick="startInventory()">Почати інвентаризацію</button>
+        <button onclick="showSyncModal()">Далі</button>
+      </div>
+    </div>
+    
+    <!-- Модальне вікно синхронізації -->
+    <div id="sync-modal" class="modal">
+      <div class="modal-content">
+        <h2>🔄 Синхронізація з Poster</h2>
+        <p style="color: #666; margin-bottom: 30px; font-size: 1.1em;">
+          Оновити дані з Poster перед інвентаризацією?
+        </p>
+        <div style="display: flex; gap: 15px; justify-content: center;">
+          <button 
+            onclick="startWithSync()" 
+            style="background: #10b981; flex: 1;">
+            Так
+          </button>
+          <button 
+            onclick="startWithoutSync()" 
+            style="background: #6b7280; flex: 1;">
+            Ні
+          </button>
+        </div>
+        <div id="sync-status" style="margin-top: 20px; font-size: 0.9em; color: #666;"></div>
       </div>
     </div>
     
@@ -667,9 +690,9 @@
       }
     }
     
-    // === ОСНОВНА ЛОГІКА ===
-
-    async function startInventory() {
+    // === ПОКАЗАТИ МОДАЛЬНЕ ВІКНО СИНХРОНІЗАЦІЇ ===
+    
+    function showSyncModal() {
       const dateInput = document.getElementById("inventory-date").value;
       if (!dateInput) {
         alert("Будь ласка, введіть дату інвентаризації");
@@ -677,7 +700,74 @@
       }
       
       inventoryDate = dateInput;
+      
+      // Закрываем модалку с датой, открываем модалку синхронизации
       document.getElementById("date-modal").classList.remove("active");
+      document.getElementById("sync-modal").classList.add("active");
+    }
+    
+    // === ПОЧАТИ З СИНХРОНІЗАЦІЄЮ ===
+    
+    async function startWithSync() {
+      const syncStatus = document.getElementById("sync-status");
+      const buttons = document.querySelectorAll("#sync-modal button");
+      
+      // Блокируем кнопки
+      buttons.forEach(btn => btn.disabled = true);
+      
+      syncStatus.textContent = "⏳ Синхронізація з Poster...";
+      syncStatus.style.color = "#666";
+      
+      try {
+        // Синхронизируем все ID
+        const response = await fetch(`${API_URL}/api/sync-all-ids`);
+        const result = await response.json();
+        
+        if (!result.success) {
+          throw new Error(result.message || "Помилка синхронізації");
+        }
+        
+        // Показываем результат
+        const added = result.added || 0;
+        const updated = result.updated || 0;
+        const deleted = result.deleted || 0;
+        
+        let message = "✅ Синхронізація завершена!";
+        if (added > 0) message += ` 🆕 Додано: ${added}`;
+        if (updated > 0) message += ` 🔄 Оновлено: ${updated}`;
+        if (deleted > 0) message += ` ❌ Видалено: ${deleted}`;
+        
+        syncStatus.textContent = message;
+        syncStatus.style.color = "#10b981";
+        
+        // Ждем 1.5 секунды чтобы показать результат
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Закрываем модалку и начинаем инвентаризацию
+        document.getElementById("sync-modal").classList.remove("active");
+        await startInventory();
+        
+      } catch (error) {
+        console.error("Помилка синхронізації:", error);
+        syncStatus.textContent = `❌ Помилка: ${error.message}`;
+        syncStatus.style.color = "#ef4444";
+        
+        // Разблокируем кнопки
+        buttons.forEach(btn => btn.disabled = false);
+      }
+    }
+    
+    // === ПОЧАТИ БЕЗ СИНХРОНІЗАЦІЇ ===
+    
+    async function startWithoutSync() {
+      document.getElementById("sync-modal").classList.remove("active");
+      await startInventory();
+    }
+    
+    // === ОСНОВНА ЛОГІКА ===
+
+    async function startInventory() {
+      // inventoryDate уже установлена в showSyncModal()
       
       // ✅ СТВОРЮЄМО АРКУШ ОДРАЗУ ПРИ ВИБОРІ ДАТИ
       try {

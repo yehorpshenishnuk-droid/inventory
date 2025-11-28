@@ -680,7 +680,7 @@
     async function lockLocation(locationNumber) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд timeout
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд timeout
         
         const response = await fetch(`${API_URL}/api/locks/lock`, {
           method: "POST",
@@ -956,7 +956,16 @@
     async function showProducts(fridge) {
       console.log("📂 Відкриваю холодильник:", fridge.fridgeNumber);
       
-      // Блокуємо холодильник з retry (одразу, без перевірки)
+      // Перевіряємо блокування
+      const lock = await checkLocationLock(fridge.fridgeNumber);
+      
+      if (lock && lock.userName !== currentUserName) {
+        // Показуємо гарне модальне вікно
+        showLockModal(fridge, lock);
+        return;
+      }
+      
+      // Блокуємо холодильник з retry
       let lockResult = null;
       let attempts = 0;
       const maxAttempts = 3;
@@ -971,26 +980,9 @@
           break;
         }
         
-        // Якщо холодильник ДІЙСНО зайнятий іншим користувачем (не timeout, не мережа)
-        if (lockResult.error && 
-            (lockResult.error.includes("открыт пользователем") || 
-             lockResult.error.includes("заблоковано користувачем"))) {
-          // Витягуємо ім'я користувача з помилки
-          const match = lockResult.error.match(/пользователем (.+)$/) || 
-                       lockResult.error.match(/користувачем (.+)$/);
-          if (match) {
-            console.log("🔒 Холодильник зайнятий користувачем:", match[1]);
-            showLockModal(fridge, { userName: match[1] });
-            return;
-          }
-        }
-        
-        // Інші помилки (timeout, мережа) - пробуємо ще раз
-        console.log(`⚠️ Помилка спроби ${attempts}: ${lockResult.error}`);
-        
-        // Якщо не остання спроба - чекаємо 200мс
+        // Якщо не остання спроба - чекаємо 1 секунду
         if (attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
       

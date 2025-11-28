@@ -6,6 +6,7 @@ import {
   readAllProductsFromPoster,
   createInventorySheet,
   writeQuantitiesToInventorySheet,
+  writeFinalInventoryReport,
   readInventorySheetData,
   checkInventorySheetExists,
   sheets,
@@ -1044,6 +1045,45 @@ app.post("/api/inventory/save", async (req, res) => {
     res.json({
       success: true,
       message: "Инвентаризация сохранена",
+      sheetName
+    });
+
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// =====================================================
+// ФІНАЛІЗАЦІЯ ІНВЕНТАРИЗАЦІЇ (Провести інвентаризацію)
+// =====================================================
+
+app.post("/api/inventory/finalize", async (req, res) => {
+  try {
+    const { inventoryDate } = req.body;
+
+    if (!inventoryDate) {
+      return res.status(400).json({
+        success: false,
+        error: "Не вказана дата інвентаризації"
+      });
+    }
+
+    const sheetName = `Інвентаризація ${inventoryDate}`;
+
+    // Перевіряємо чи існує лист
+    if (!await checkInventorySheetExists(inventoryDate)) {
+      return res.status(404).json({
+        success: false,
+        error: "Лист інвентаризації не знайдено"
+      });
+    }
+
+    // Перезаписуємо лист у фінальний формат
+    await writeFinalInventoryReport(sheetName);
+
+    res.json({
+      success: true,
+      message: "Інвентаризація успішно проведена",
       sheetName
     });
 

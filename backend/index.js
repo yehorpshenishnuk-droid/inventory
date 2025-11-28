@@ -1032,6 +1032,9 @@ app.post("/api/inventory/save", async (req, res) => {
     inventoryData.forEach(fridge => {
       dataByFridge[fridge.fridgeNumber] = fridge.products.map(item => ({
         name: item.name,
+        category: item.category || "",
+        type: item.type || "",
+        unit: item.unit || "кг",
         quantity: item.quantity
       }));
     });

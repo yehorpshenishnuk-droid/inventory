@@ -965,9 +965,20 @@ app.get("/api/inventory/products", async (req, res) => {
     const products = await readProductsFromSheet();
     const allProducts = await readAllProductsFromPoster();
     
+    console.log(`📊 Завантажено продуктів з "№ Холод-ID": ${products.length}`);
+    console.log(`📊 Завантажено продуктів з "Всі ID": ${allProducts.length}`);
+    
     // Объединяем: сначала продукты с локациями, потом все продукты
     const combined = [...products, ...allProducts];
+    
+    console.log(`📊 Загальна кількість після об'єднання: ${combined.length}`);
+    
     const grouped = groupInventory(combined);
+    
+    console.log(`📊 Холодильників створено: ${grouped.length}`);
+    grouped.forEach(fridge => {
+      console.log(`  - ${fridge.fridgeNumber}: ${fridge.products.length} позицій`);
+    });
 
     res.json({
       data: grouped,

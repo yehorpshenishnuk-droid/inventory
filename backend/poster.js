@@ -152,6 +152,20 @@ export async function getAllPosterItems() {
   const COLD_CATEGORIES = [7, 8, 11, 16, 18, 19, 29, 32, 36, 44];
   const KITCHEN_CATEGORIES = [...HOT_CATEGORIES, ...COLD_CATEGORIES];
 
+  // Категорії інгредієнтів БАРУ - виключаємо по назві
+  const BAR_INGREDIENT_CATEGORIES = [
+    "ДЖИН",
+    "ВІСКІ", 
+    "ГОРІЛКА",
+    "СІК БАР",
+    "СИРОП RIOBA",
+    "ПИВО",
+    "БАР МОРОЗКА",
+    "ВИНО",
+    "ВИНО ИГРИСТЕ",
+    "БРЕНДІ"
+  ];
+
   const [products, prepacks, ingredients] = await Promise.all([
     getPosterProducts(),
     getPosterPrepacks(),
@@ -170,10 +184,26 @@ export async function getAllPosterItems() {
     }
   });
 
-  // Фильтруем ингредиенты - берем ТОЛЬКО кухню
-  const filteredIngredients = ingredients.filter(i => 
-    KITCHEN_CATEGORIES.includes(Number(i.category_id))
-  );
+  // Фильтруем ингредиенты - берем ТОЛЬКО кухню И исключаем бар по названию
+  const filteredIngredients = ingredients.filter(i => {
+    // Должна быть категория кухни
+    const isKitchenCategory = KITCHEN_CATEGORIES.includes(Number(i.category_id));
+    // И НЕ должна быть барная категория по названию
+    const isBarCategory = BAR_INGREDIENT_CATEGORIES.includes(i.category_name);
+    
+    return isKitchenCategory && !isBarCategory;
+  });
+
+  // Фильтруем напівфабрикати - исключаем П/Ф бара (напитки)
+  const filteredPrepacks = prepacks.filter(p => {
+    const name = p.product_name.toLowerCase();
+    // Исключаем если название начинается с "п/ф" и содержит напитки
+    if (name.startsWith("п/ф")) {
+      const drinkKeywords = ["лимонад", "облипиха", "клюква", "малина", "смородина", "чай", "соска"];
+      return !drinkKeywords.some(keyword => name.includes(keyword));
+    }
+    return true;
+  });
 
   const allItems = [
     ...regularProducts.map(p => ({
@@ -190,8 +220,8 @@ export async function getAllPosterItems() {
       type: "Тех.карта"
     })),
 
-    // Напівфабрикати - ЗАВЖДИ додаємо (всі для кухні)
-    ...prepacks.map(p => ({
+    // Напівфабрикати - фільтруємо бар
+    ...filteredPrepacks.map(p => ({
       id: p.product_id,
       name: p.product_name,
       category: "Напівфабрикати",

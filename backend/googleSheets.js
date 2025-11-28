@@ -227,7 +227,7 @@ export async function getAllLocks() {
 // ========================= ОСНОВНОЙ ЛИСТ ============================= //
 
 // ID продуктів які рахуються в ШТУКАХ (решта - в КГ)
-const ITEMS_IN_PIECES = [318, 610, 609, 607];
+const ITEMS_IN_PIECES = [318, 525, 610, 609, 607];
 
 export async function readProductsFromSheet() {
   try {

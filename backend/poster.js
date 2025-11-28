@@ -145,6 +145,21 @@ export async function getPosterIngredients() {
 export async function getAllPosterItems() {
   console.log("📡 Загружаю данные из Poster...");
 
+  // Категории БАРа и напитков - НЕ выгружаем
+  const EXCLUDED_CATEGORIES = [
+    "АЛКОГОЛЬ",
+    "Алкогольні коктейлі",
+    "ВИНО",
+    "БОКАЛ ВИНА",
+    "ПИВО",
+    "ХОЛОДНІ НАПОЇ",
+    "ЧАЙ / КОФЕ",
+    "ДОПИ БАР",
+    "Кава на Безлактозному",
+    "КАВА ПЕРСОНАЛ",
+    "ДОПИ"
+  ];
+
   const [products, prepacks, ingredients] = await Promise.all([
     getPosterProducts(),
     getPosterPrepacks(),
@@ -156,6 +171,11 @@ export async function getAllPosterItems() {
   const techCards = [];
 
   products.forEach(item => {
+    // Пропускаем категории бара и напитков
+    if (EXCLUDED_CATEGORIES.includes(item.category_name)) {
+      return;
+    }
+    
     if (item.item_type === "2") techCards.push(item);
     else regularProducts.push(item);
   });

@@ -147,8 +147,10 @@ export async function getPosterIngredients() {
 export async function getAllPosterItems() {
   console.log("📡 Загружаю данные из Poster...");
 
-  // ID категорий БАРа - НЕ выгружаем
-  const BAR_CATEGORIES = [9, 14, 27, 28, 34, 41, 42, 47, 22, 24, 25, 26, 39, 30];
+  // ID категорій КУХНІ - ТІЛЬКИ ЦІ виводимо
+  const HOT_CATEGORIES = [4, 13, 15, 46, 33];
+  const COLD_CATEGORIES = [7, 8, 11, 16, 18, 19, 29, 32, 36, 44];
+  const KITCHEN_CATEGORIES = [...HOT_CATEGORIES, ...COLD_CATEGORIES];
 
   const [products, prepacks, ingredients] = await Promise.all([
     getPosterProducts(),
@@ -161,18 +163,16 @@ export async function getAllPosterItems() {
   const techCards = [];
 
   products.forEach(item => {
-    // Пропускаем категории бара по ID
-    if (BAR_CATEGORIES.includes(Number(item.category_id))) {
-      return;
+    // Берем ТОЛЬКО категории кухни
+    if (KITCHEN_CATEGORIES.includes(Number(item.category_id))) {
+      if (item.item_type === "2") techCards.push(item);
+      else regularProducts.push(item);
     }
-    
-    if (item.item_type === "2") techCards.push(item);
-    else regularProducts.push(item);
   });
 
-  // Фильтруем ингредиенты - убираем бар по ID
+  // Фильтруем ингредиенты - берем ТОЛЬКО кухню
   const filteredIngredients = ingredients.filter(i => 
-    !BAR_CATEGORIES.includes(Number(i.category_id))
+    KITCHEN_CATEGORIES.includes(Number(i.category_id))
   );
 
   const allItems = [
@@ -190,6 +190,7 @@ export async function getAllPosterItems() {
       type: "Тех.карта"
     })),
 
+    // Напівфабрикати - ЗАВЖДИ додаємо (всі для кухні)
     ...prepacks.map(p => ({
       id: p.product_id,
       name: p.product_name,

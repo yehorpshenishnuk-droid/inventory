@@ -1446,6 +1446,26 @@
         const result = await response.json();
         
         if (result.success) {
+          // ФІНАЛІЗУЄМО ІНВЕНТАРИЗАЦІЮ - перезаписуємо в формат звіту
+          console.log("🎯 Фіналізую інвентаризацію...");
+          
+          const finalizeResponse = await fetch(`${API_URL}/api/inventory/finalize`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ 
+              inventoryDate: inventoryDate
+            })
+          });
+          
+          const finalizeResult = await finalizeResponse.json();
+          
+          if (!finalizeResult.success) {
+            console.error("⚠️ Помилка фіналізації:", finalizeResult.error);
+            // Продовжуємо навіть якщо фіналізація не вдалася
+          }
+          
           // Показуємо модальне вікно з кнопкою завантаження PDF
           const modalHtml = `
             <div style="text-align: center;">

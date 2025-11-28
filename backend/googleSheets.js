@@ -286,6 +286,41 @@ export async function readProductsFromSheet() {
   }
 }
 
+// Читаем ВСІ продукти з листа "Всі ID з Poster"
+export async function readAllProductsFromPoster() {
+  try {
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Всі ID з Poster!B2:D`,
+    });
+
+    const rows = resp.data.values || [];
+    const result = [];
+
+    rows.forEach((row, i) => {
+      const name = row[0] || "";
+      const type = row[2] || "";
+      
+      if (name) {
+        result.push({
+          rowIndex: i + 2,
+          fridge: "ALL", // Специальный маркер для "Усі продукти"
+          name: name,
+          category: "", // Категорію не берём
+          type: type,
+          unit: "кг",
+          quantity: "",
+        });
+      }
+    });
+
+    return result;
+  } catch (err) {
+    console.error("Ошибка readAllProductsFromPoster:", err);
+    throw err;
+  }
+}
+
 // ====================== ИНВЕНТАРИЗАЦИОННЫЕ ЛИСТЫ ======================= //
 
 export async function checkInventorySheetExists(date) {

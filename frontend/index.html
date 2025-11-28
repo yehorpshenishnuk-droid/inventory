@@ -680,7 +680,7 @@
     async function lockLocation(locationNumber) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд timeout
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд timeout
         
         const response = await fetch(`${API_URL}/api/locks/lock`, {
           method: "POST",
@@ -956,16 +956,7 @@
     async function showProducts(fridge) {
       console.log("📂 Відкриваю холодильник:", fridge.fridgeNumber);
       
-      // Перевіряємо блокування
-      const lock = await checkLocationLock(fridge.fridgeNumber);
-      
-      if (lock && lock.userName !== currentUserName) {
-        // Показуємо гарне модальне вікно
-        showLockModal(fridge, lock);
-        return;
-      }
-      
-      // Блокуємо холодильник з retry
+      // Блокуємо холодильник з retry (одразу, без перевірки)
       let lockResult = null;
       let attempts = 0;
       const maxAttempts = 3;
@@ -980,9 +971,19 @@
           break;
         }
         
-        // Якщо не остання спроба - чекаємо 1 секунду
+        // Якщо холодильник зайнятий іншим користувачем - показуємо модалку
+        if (lockResult.error && (lockResult.error.includes("заблоковано") || lockResult.error.includes("открыт пользователем"))) {
+          // Витягуємо ім'я користувача з помилки
+          const match = lockResult.error.match(/користувачем (.+)$/) || lockResult.error.match(/пользователем (.+)$/);
+          if (match) {
+            showLockModal(fridge, { userName: match[1] });
+            return;
+          }
+        }
+        
+        // Якщо не остання спроба - чекаємо 200мс (замість 1 сек)
         if (attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
       

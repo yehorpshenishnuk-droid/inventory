@@ -21,7 +21,17 @@ import {
 import LockManager from "./lockManager.js";
 
 const app = express();
-app.use(cors());
+
+// CORS налаштування для frontend
+app.use(cors({
+  origin: [
+    'https://inventory-1-fydp.onrender.com',
+    'http://localhost:3000',
+    'http://localhost:5000'
+  ],
+  credentials: true
+}));
+
 app.use(express.json());
 
 // =====================================================

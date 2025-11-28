@@ -3,6 +3,7 @@ import cors from "cors";
 
 import {
   readProductsFromSheet,
+  readAllProductsFromPoster,
   createInventorySheet,
   writeQuantitiesToInventorySheet,
   readInventorySheetData,
@@ -949,9 +950,13 @@ app.get("/api/inventory/products", async (req, res) => {
       }
     }
 
-    // Иначе читаем шаблон Лист1
+    // Иначе читаем шаблон + всі продукти
     const products = await readProductsFromSheet();
-    const grouped = groupInventory(products);
+    const allProducts = await readAllProductsFromPoster();
+    
+    // Объединяем: сначала продукты с локациями, потом все продукты
+    const combined = [...products, ...allProducts];
+    const grouped = groupInventory(combined);
 
     res.json({
       data: grouped,

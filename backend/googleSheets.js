@@ -513,6 +513,11 @@ export async function writeFinalInventoryReport(sheetName) {
             unit: unit,
             total: 0
           });
+        } else {
+          // Якщо категорія була порожня, але зараз є - оновлюємо
+          if (!productMap.get(name).category && category) {
+            productMap.get(name).category = category;
+          }
         }
         productMap.get(name).total += qty;
       }

@@ -841,15 +841,7 @@ app.get("/api/sync-all-ids", async (req, res) => {
       });
     }
     
-    // Создаем Map для быстрого поиска по ID
-    const posterMap = new Map();
-    posterItems.forEach(item => {
-      posterMap.set(String(item.id), {
-        name: item.name,
-        category: item.category,
-        type: item.type
-      });
-    });
+    console.log(`📦 Отримано: ${posterItems.length} позицій`);
     
     // Проверяем существует ли лист
     const spreadsheet = await sheets.spreadsheets.get({
@@ -860,113 +852,70 @@ app.get("/api/sync-all-ids", async (req, res) => {
       s => s.properties.title === SHEET_NAME
     );
     
-    // Если листа нет - создаем полностью
+    // Если листа нет - создаем
     if (!sheetExists) {
-      return res.redirect(307, '/api/upload-all-ids-to-sheets');
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: SHEET_NAME
+              }
+            }
+          }]
+        }
+      });
+      console.log(`✅ Створено аркуш "${SHEET_NAME}"`);
     }
     
-    // Читаем существующие данные
-    const sheetData = await sheets.spreadsheets.values.get({
+    // Очищаем лист полностью
+    await sheets.spreadsheets.values.clear({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!A2:D`
+      range: `${SHEET_NAME}!A:D`
     });
+    console.log("🗑️ Очищено старі дані");
     
-    const rows = sheetData.data.values || [];
-    
-    // Создаем Map существующих записей
-    const sheetMap = new Map();
-    rows.forEach((row, index) => {
-      if (row[0]) {
-        sheetMap.set(String(row[0]), {
-          name: row[1] || "",
-          category: row[2] || "",
-          type: row[3] || "",
-          rowIndex: index + 2
-        });
+    // Записываем заголовки
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A1:D1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["ID", "Назва", "Категорія", "Тип"]]
       }
     });
     
-    const updates = [];
-    let addedCount = 0;
-    let updatedCount = 0;
-    let deletedCount = 0;
+    // Формируем данные
+    const values = posterItems.map(item => [
+      item.id,
+      item.name,
+      item.category,
+      item.type
+    ]);
     
-    // Обновляем существующие и находим новые
-    for (const [id, newData] of posterMap) {
-      if (sheetMap.has(id)) {
-        const existing = sheetMap.get(id);
-        // Проверяем изменилось ли что-то
-        if (existing.name !== newData.name || 
-            existing.category !== newData.category ||
-            existing.type !== newData.type) {
-          updates.push({
-            range: `${SHEET_NAME}!B${existing.rowIndex}:D${existing.rowIndex}`,
-            values: [[newData.name, newData.category, newData.type]]
-          });
-          updatedCount++;
-        }
-      } else {
-        addedCount++;
+    // Записываем данные
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A2`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: values
       }
-    }
+    });
     
-    // Применяем обновления
-    if (updates.length > 0) {
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          valueInputOption: "RAW",
-          data: updates
-        }
-      });
-    }
-    
-    // Добавляем новые записи
-    if (addedCount > 0) {
-      const newRows = [];
-      for (const [id, data] of posterMap) {
-        if (!sheetMap.has(id)) {
-          newRows.push([id, data.name, data.category, data.type]);
-        }
-      }
-      
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A:D`,
-        valueInputOption: "RAW",
-        requestBody: { values: newRows }
-      });
-    }
-    
-    // Помечаем удаленные
-    const deletedRows = [];
-    for (const [id, data] of sheetMap) {
-      if (!posterMap.has(id)) {
-        deletedRows.push({
-          range: `${SHEET_NAME}!D${data.rowIndex}`,
-          values: [["❌ Видалено з Poster"]]
-        });
-        deletedCount++;
-      }
-    }
-    
-    if (deletedRows.length > 0) {
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          valueInputOption: "RAW",
-          data: deletedRows
-        }
-      });
-    }
+    console.log(`✅ Записано ${values.length} рядків`);
     
     res.json({
       success: true,
-      message: "✅ Синхронізація завершена",
-      added: addedCount,
-      updated: updatedCount,
-      deleted: deletedCount,
-      total: posterItems.length
+      message: `✅ Синхронізація завершена! Оновлено ${posterItems.length} позицій`,
+      total: posterItems.length,
+      breakdown: {
+        products: posterItems.filter(i => i.type === "Продукт меню").length,
+        techCards: posterItems.filter(i => i.type === "Тех.карта").length,
+        prepacks: posterItems.filter(i => i.type === "Напівфабрикат").length,
+        ingredients: posterItems.filter(i => i.type === "Інгредієнт").length
+      }
     });
     
   } catch (err) {

@@ -1044,24 +1044,83 @@ app.post("/api/inventory/save", async (req, res) => {
     }
 
     let sheetName;
+    const sheetExists = await checkInventorySheetExists(inventoryDate);
 
-    if (!await checkInventorySheetExists(inventoryDate)) {
+    if (!sheetExists) {
       sheetName = await createInventorySheet(inventoryDate);
     } else {
       sheetName = `Інвентаризація ${inventoryDate}`;
     }
 
+    // ✅ ЧИТАЄМО ІСНУЮЧІ ДАНІ (якщо лист вже є)
+    let existingData = {};
+    if (sheetExists) {
+      const savedData = await readInventorySheetData(inventoryDate);
+      if (savedData && savedData.length > 0) {
+        console.log(`📖 Завантажено існуючих даних: ${savedData.length} записів`);
+        
+        // Створюємо мапу: "fridgeNumber-productName" -> {name, category, unit, quantity}
+        savedData.forEach(item => {
+          if (!existingData[item.fridge]) {
+            existingData[item.fridge] = {};
+          }
+          existingData[item.fridge][item.name] = {
+            name: item.name,
+            category: item.category || "",
+            type: item.type || "",
+            unit: item.unit || "кг",
+            quantity: item.quantity
+          };
+        });
+      }
+    }
+
+    // ✅ ОБ'ЄДНУЄМО з новими даними
     const dataByFridge = {};
 
     inventoryData.forEach(fridge => {
-      dataByFridge[fridge.fridgeNumber] = fridge.products.map(item => ({
-        name: item.name,
-        category: item.category || "",
-        type: item.type || "",
-        unit: item.unit || "кг",
-        quantity: item.quantity
-      }));
+      const fridgeNum = fridge.fridgeNumber;
+      
+      // Копіюємо існуючі дані для цього холодильника
+      if (existingData[fridgeNum]) {
+        dataByFridge[fridgeNum] = Object.values(existingData[fridgeNum]);
+      } else {
+        dataByFridge[fridgeNum] = [];
+      }
+      
+      // Оновлюємо/додаємо нові дані
+      fridge.products.forEach(item => {
+        const existingIndex = dataByFridge[fridgeNum].findIndex(p => p.name === item.name);
+        
+        const productData = {
+          name: item.name,
+          category: item.category || "",
+          type: item.type || "",
+          unit: item.unit || "кг",
+          quantity: item.quantity
+        };
+        
+        if (existingIndex >= 0) {
+          // Оновлюємо існуючий запис
+          dataByFridge[fridgeNum][existingIndex] = productData;
+          console.log(`♻️ Оновлено: ${fridgeNum} - ${item.name} = ${item.quantity}`);
+        } else {
+          // Додаємо новий запис
+          dataByFridge[fridgeNum].push(productData);
+          console.log(`➕ Додано: ${fridgeNum} - ${item.name} = ${item.quantity}`);
+        }
+      });
     });
+
+    // ✅ ОБ'ЄДНУЄМО з ІНШИМИ холодильниками (які не в inventoryData)
+    Object.keys(existingData).forEach(fridgeNum => {
+      if (!dataByFridge[fridgeNum]) {
+        dataByFridge[fridgeNum] = Object.values(existingData[fridgeNum]);
+        console.log(`📦 Збережено дані з іншого пристрою: ${fridgeNum} (${dataByFridge[fridgeNum].length} позицій)`);
+      }
+    });
+
+    console.log(`💾 Зберігаю об'єднані дані: ${Object.keys(dataByFridge).length} холодильників`);
 
     await writeQuantitiesToInventorySheet(sheetName, dataByFridge);
 

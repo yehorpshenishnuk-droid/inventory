@@ -504,27 +504,6 @@
     </div>
     
     <!-- Модальне вікно синхронізації -->
-    <div id="sync-modal" class="modal">
-      <div class="modal-content">
-        <h2>🔄 Синхронізація з Poster</h2>
-        <p style="color: #666; margin-bottom: 30px; font-size: 1.1em;">
-          Оновити дані з Poster перед інвентаризацією?
-        </p>
-        <div style="display: flex; gap: 15px; justify-content: center;">
-          <button 
-            onclick="startWithSync()" 
-            style="background: #10b981; flex: 1;">
-            Так
-          </button>
-          <button 
-            onclick="startWithoutSync()" 
-            style="background: #6b7280; flex: 1;">
-            Ні
-          </button>
-        </div>
-        <div id="sync-status" style="margin-top: 20px; font-size: 0.9em; color: #666;"></div>
-      </div>
-    </div>
     
     <!-- Модальне вікно для незаповнених позицій -->
     <div id="unfilled-modal" class="modal">
@@ -546,6 +525,7 @@
     </div>
     
     <!-- Екран вибору холодильника -->
+    <div id="sync-button-container" style="display: none; margin-bottom: 20px;"></div>
     <div id="fridge-selector" style="display: none;"></div>
     
     <!-- Екран списку продуктів -->
@@ -755,64 +735,6 @@
       startInventory();
     }
     
-    // === ПОЧАТИ З СИНХРОНІЗАЦІЄЮ ===
-    
-    async function startWithSync() {
-      const syncStatus = document.getElementById("sync-status");
-      const buttons = document.querySelectorAll("#sync-modal button");
-      
-      // Блокируем кнопки
-      buttons.forEach(btn => btn.disabled = true);
-      
-      syncStatus.textContent = "⏳ Синхронізація з Poster...";
-      syncStatus.style.color = "#666";
-      
-      try {
-        // Синхронизируем все ID
-        const response = await fetch(`${API_URL}/api/sync-all-ids`);
-        const result = await response.json();
-        
-        if (!result.success) {
-          throw new Error(result.message || "Помилка синхронізації");
-        }
-        
-        // Показываем результат
-        const added = result.added || 0;
-        const updated = result.updated || 0;
-        const deleted = result.deleted || 0;
-        
-        let message = "✅ Синхронізація завершена!";
-        if (added > 0) message += ` 🆕 Додано: ${added}`;
-        if (updated > 0) message += ` 🔄 Оновлено: ${updated}`;
-        if (deleted > 0) message += ` ❌ Видалено: ${deleted}`;
-        
-        syncStatus.textContent = message;
-        syncStatus.style.color = "#10b981";
-        
-        // Ждем 1.5 секунды чтобы показать результат
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Закрываем модалку и начинаем инвентаризацию
-        document.getElementById("sync-modal").classList.remove("active");
-        await startInventory();
-        
-      } catch (error) {
-        console.error("Помилка синхронізації:", error);
-        syncStatus.textContent = `❌ Помилка: ${error.message}`;
-        syncStatus.style.color = "#ef4444";
-        
-        // Разблокируем кнопки
-        buttons.forEach(btn => btn.disabled = false);
-      }
-    }
-    
-    // === ПОЧАТИ БЕЗ СИНХРОНІЗАЦІЇ ===
-    
-    async function startWithoutSync() {
-      document.getElementById("sync-modal").classList.remove("active");
-      await startInventory();
-    }
-    
     // === СИНХРОНІЗАЦІЯ З POSTER (кнопка на главном экране) ===
     
     async function syncWithPoster() {
@@ -954,7 +876,11 @@
       const selector = document.getElementById("fridge-selector");
       selector.innerHTML = "";
       
-      // Добавляем кнопку синхронизации
+      // Добавляем кнопку синхронизации в отдельный контейнер
+      const syncContainer = document.getElementById("sync-button-container");
+      syncContainer.style.display = "block";
+      syncContainer.innerHTML = "";
+      
       const syncButton = document.createElement("button");
       syncButton.className = "sync-button";
       syncButton.innerHTML = `
@@ -962,20 +888,22 @@
         <span class="sync-text">Синхронізувати з Poster</span>
         <span class="sync-status" id="inline-sync-status"></span>
       `;
-      syncButton.style.gridColumn = "1 / -1";
       syncButton.onclick = syncWithPoster;
-      selector.appendChild(syncButton);
+      syncContainer.appendChild(syncButton);
       
       // Отримуємо всі блокування
       const locks = await getAllLocationLocks();
       
       allFridges.forEach(fridge => {
-        // Пропускаем пустые холодильники и "Без холодильника"
-        if (!fridge.fridgeNumber || 
-            fridge.fridgeNumber === '' || 
-            fridge.fridgeNumber === 'Без холодильника' ||
-            fridge.fridgeNumber === '#N/A' ||
-            fridge.fridgeNumber === 'undefined') {
+        const fridgeNum = String(fridge.fridgeNumber || '').trim();
+        
+        // Пропускаем пустые холодильники и невалидные значения
+        if (!fridgeNum || 
+            fridgeNum === '' || 
+            fridgeNum === 'Без холодильника' ||
+            fridgeNum.includes('#N/A') ||
+            fridgeNum === 'undefined' ||
+            fridgeNum === 'null') {
           return;
         }
         

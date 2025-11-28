@@ -250,12 +250,15 @@ export async function readProductsFromSheet() {
       // row[4] = Холодильник
       // row[5] = Стелаж
       
-      const productId = row[0] ? Number(row[0]) : null;
+      // Пропускаємо рядки без назви продукту
+      if (!row[1]) return;
+      
+      const productId = (row[0] && !isNaN(Number(row[0]))) ? Number(row[0]) : null;
       const fridgeValue = row[4] || ""; // Колонка E - Холодильник
       const shelfValue = row[5] || "";  // Колонка F - Стелаж
       
       // Визначаємо одиниці виміру по ID
-      const unit = ITEMS_IN_PIECES.includes(productId) ? "шт" : "кг";
+      const unit = (productId && ITEMS_IN_PIECES.includes(productId)) ? "шт" : "кг";
 
       const locations = [];
 
@@ -305,12 +308,12 @@ export async function readAllProductsFromPoster() {
     const result = [];
 
     rows.forEach((row, i) => {
-      const productId = row[0] ? Number(row[0]) : null;
+      const productId = (row[0] && !isNaN(Number(row[0]))) ? Number(row[0]) : null;
       const name = row[1] || "";
       const type = row[3] || "";
       
       // Визначаємо одиниці виміру по ID
-      const unit = ITEMS_IN_PIECES.includes(productId) ? "шт" : "кг";
+      const unit = (productId && ITEMS_IN_PIECES.includes(productId)) ? "шт" : "кг";
       
       if (name) {
         result.push({

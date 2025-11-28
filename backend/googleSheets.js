@@ -226,6 +226,9 @@ export async function getAllLocks() {
 
 // ========================= ОСНОВНОЙ ЛИСТ ============================= //
 
+// ID продуктів які рахуються в ШТУКАХ (решта - в КГ)
+const ITEMS_IN_PIECES = [318, 610, 609, 607];
+
 export async function readProductsFromSheet() {
   try {
     // Читаем из листа "№ Холод-ID"
@@ -240,15 +243,19 @@ export async function readProductsFromSheet() {
 
     rows.forEach((row, i) => {
       // В новом листе:
-      // row[0] = ID (пропускаем)
+      // row[0] = ID
       // row[1] = Назва
       // row[2] = Категорія
       // row[3] = Тип
-      // row[4] = Холодильник (было row[0])
-      // row[5] = Стелаж (было row[1])
+      // row[4] = Холодильник
+      // row[5] = Стелаж
       
+      const productId = row[0] ? Number(row[0]) : null;
       const fridgeValue = row[4] || ""; // Колонка E - Холодильник
       const shelfValue = row[5] || "";  // Колонка F - Стелаж
+      
+      // Визначаємо одиниці виміру по ID
+      const unit = ITEMS_IN_PIECES.includes(productId) ? "шт" : "кг";
 
       const locations = [];
 
@@ -273,7 +280,7 @@ export async function readProductsFromSheet() {
           name: row[1] || "",     // Колонка B - Назва
           category: row[2] || "", // Колонка C - Категорія
           type: row[3] || "",     // Колонка D - Тип
-          unit: "кг",             // По умолчанию
+          unit: unit,             // Визначаємо по ID
           quantity: "",
         })
       );
@@ -291,15 +298,19 @@ export async function readAllProductsFromPoster() {
   try {
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Всі ID з Poster!B2:D`,
+      range: `Всі ID з Poster!A2:D`,
     });
 
     const rows = resp.data.values || [];
     const result = [];
 
     rows.forEach((row, i) => {
-      const name = row[0] || "";
-      const type = row[2] || "";
+      const productId = row[0] ? Number(row[0]) : null;
+      const name = row[1] || "";
+      const type = row[3] || "";
+      
+      // Визначаємо одиниці виміру по ID
+      const unit = ITEMS_IN_PIECES.includes(productId) ? "шт" : "кг";
       
       if (name) {
         result.push({
@@ -308,7 +319,7 @@ export async function readAllProductsFromPoster() {
           name: name,
           category: "", // Категорію не берём
           type: type,
-          unit: "кг",
+          unit: unit,
           quantity: "",
         });
       }
@@ -354,14 +365,7 @@ export async function createInventorySheet(date) {
 
     if (exists) return sheetName;
 
-    // Копируем ВСЕ данные из мастер-листа без фильтрации
-    const master = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${MASTER_SHEET_NAME}!A1:Z`,
-    });
-
-    const rows = master.data.values || [];
-
+    // Створюємо новий лист
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
@@ -369,11 +373,14 @@ export async function createInventorySheet(date) {
       },
     });
 
+    // Додаємо заголовки: Назва | Категорія | Одиниці виміру | Залишки
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A1`,
+      range: `${sheetName}!A1:D1`,
       valueInputOption: "RAW",
-      requestBody: { values: rows },
+      requestBody: {
+        values: [["Назва", "Категорія", "Одиниці виміру", "Залишки"]],
+      },
     });
 
     return sheetName;
@@ -463,85 +470,58 @@ export async function writeQuantitiesToInventorySheet(
   inventoryByFridge
 ) {
   try {
-    const headerResp = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A1:Z1`,
-    });
-
-    const headers = headerResp.data.values?.[0] || [];
-
-    const columns = {};
-    let totalColumn = null;
-
-    headers.forEach((h, i) => {
-      const col = String.fromCharCode(65 + i);
-
-      let m1 = h?.match(/Холодильник\s+(\d+)/i);
-      let m2 = h?.match(/Стелаж\s+(\d+)/i);
-
-      if (m1) columns[m1[1]] = { col, index: i };
-      if (m2) columns[m2[1]] = { col, index: i };
-
-      if (h?.toLowerCase() === "залишки") {
-        totalColumn = { col, index: i };
-      }
-    });
-
-    const resp = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A2:Z`,
-    });
-
-    const rows = resp.data.values || [];
-    const updates = [];
-
-    rows.forEach((row, rowIndex) => {
-      const productName = row[2];
-      if (!productName) return;
-
-      let sum = 0;
-      let hasValue = false;
-
-      Object.keys(columns).forEach((loc) => {
-        const newValue =
-          inventoryByFridge[loc]?.find((p) => p.name === productName)
-            ?.quantity ?? "";
-
-        const col = columns[loc].col;
-
-        if (newValue !== "" && !isNaN(newValue)) {
-          hasValue = true;
-          sum += Number(newValue);
-
-          updates.push({
-            range: `${sheetName}!${col}${rowIndex + 2}`,
-            values: [[newValue]],
-          });
-        } else {
-          updates.push({
-            range: `${sheetName}!${col}${rowIndex + 2}`,
-            values: [[""]],
+    // Збираємо всі унікальні продукти з усіх холодильників
+    const productMap = new Map();
+    
+    Object.keys(inventoryByFridge).forEach((fridgeNum) => {
+      inventoryByFridge[fridgeNum].forEach((product) => {
+        const key = product.name;
+        
+        if (!productMap.has(key)) {
+          productMap.set(key, {
+            name: product.name,
+            category: product.category || "",
+            type: product.type || "",
+            unit: product.unit || "кг",
+            total: 0
           });
         }
+        
+        // Додаємо кількість до загальної суми
+        const qty = Number(product.quantity) || 0;
+        if (qty > 0) {
+          productMap.get(key).total += qty;
+        }
       });
-
-      if (totalColumn) {
-        updates.push({
-          range: `${sheetName}!${totalColumn.col}${rowIndex + 2}`,
-          values: [[hasValue ? sum : ""]],
-        });
+    });
+    
+    // Готуємо дані для запису: Назва | Категорія | Одиниці виміру | Залишки
+    const data = [
+      ["Назва", "Категорія", "Одиниці виміру", "Залишки"] // Заголовки
+    ];
+    
+    // Додаємо рядки продуктів
+    productMap.forEach((product) => {
+      // Записуємо тільки продукти з залишками > 0
+      if (product.total > 0) {
+        data.push([
+          product.name,
+          product.category,
+          product.unit,
+          product.total
+        ]);
       }
     });
-
-    if (updates.length > 0) {
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          valueInputOption: "RAW",
-          data: updates,
-        },
-      });
-    }
+    
+    // Записуємо все одним запитом
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1:D${data.length}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: data,
+      },
+    });
 
     return true;
   } catch (err) {

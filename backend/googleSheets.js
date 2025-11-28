@@ -22,7 +22,7 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: "v4", auth });
 
 const SPREADSHEET_ID = "1eiJw3ADAdq6GfQxsbJp0STDsc1MyJfPXCf2caQy8khw";
-const MASTER_SHEET_NAME = "Лист1";
+const MASTER_SHEET_NAME = "№ Холод-ID";
 const LOCKS_SHEET_NAME = "Блокування";
 
 // ===================== БЛОКИРОВКИ ============================= //
@@ -228,6 +228,8 @@ export async function getAllLocks() {
 
 export async function readProductsFromSheet() {
   try {
+    // Читаем из листа "№ Холод-ID"
+    // Структура: A=ID, B=Назва, C=Категорія, D=Тип, E=Холодильник, F=Стелаж
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${MASTER_SHEET_NAME}!A2:F`,
@@ -237,8 +239,16 @@ export async function readProductsFromSheet() {
     const result = [];
 
     rows.forEach((row, i) => {
-      const fridgeValue = row[0] || "";
-      const shelfValue = row[1] || "";
+      // В новом листе:
+      // row[0] = ID (пропускаем)
+      // row[1] = Назва
+      // row[2] = Категорія
+      // row[3] = Тип
+      // row[4] = Холодильник (было row[0])
+      // row[5] = Стелаж (было row[1])
+      
+      const fridgeValue = row[4] || ""; // Колонка E - Холодильник
+      const shelfValue = row[5] || "";  // Колонка F - Стелаж
 
       const locations = [];
 
@@ -260,10 +270,10 @@ export async function readProductsFromSheet() {
         result.push({
           rowIndex: i + 2,
           fridge: loc,
-          name: row[2] || "",
-          category: row[3] || "",
-          type: row[4] || "",
-          unit: row[5] || "кг",
+          name: row[1] || "",     // Колонка B - Назва
+          category: row[2] || "", // Колонка C - Категорія
+          type: row[3] || "",     // Колонка D - Тип
+          unit: "кг",             // По умолчанию
           quantity: "",
         })
       );
@@ -309,22 +319,13 @@ export async function createInventorySheet(date) {
 
     if (exists) return sheetName;
 
+    // Копируем ВСЕ данные из мастер-листа без фильтрации
     const master = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${MASTER_SHEET_NAME}!A1:Z`,
     });
 
     const rows = master.data.values || [];
-    const filtered = [];
-
-    rows.forEach((r, i) => {
-      if (i === 0) return filtered.push(r);
-
-      const hasLoc =
-        (r[0] && r[0].trim()) || (r[1] && r[1].trim());
-
-      if (hasLoc) filtered.push(r);
-    });
 
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
@@ -337,7 +338,7 @@ export async function createInventorySheet(date) {
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1`,
       valueInputOption: "RAW",
-      requestBody: { values: filtered },
+      requestBody: { values: rows },
     });
 
     return sheetName;
@@ -379,8 +380,15 @@ export async function readInventorySheetData(date) {
     const result = [];
 
     rows.forEach((row, i) => {
-      const fridge = row[0] || "";
-      const shelf = row[1] || "";
+      // В листе инвентаризации структура такая же как в "№ Холод-ID":
+      // row[0] = ID
+      // row[1] = Назва
+      // row[2] = Категорія
+      // row[3] = Тип
+      // row[4] = Холодильник
+      // row[5] = Стелаж
+      const fridge = row[4] || "";
+      const shelf = row[5] || "";
 
       const locs = [];
 
@@ -397,10 +405,10 @@ export async function readInventorySheetData(date) {
         result.push({
           rowIndex: i + 2,
           fridge: loc,
-          name: row[2] || "",
-          category: row[3] || "",
-          type: row[4] || "",
-          unit: row[5] || "кг",
+          name: row[1] || "",     // Колонка B - Назва
+          category: row[2] || "", // Колонка C - Категорія
+          type: row[3] || "",     // Колонка D - Тип
+          unit: "кг",             // По умолчанию
           quantity: qty,
         });
       });

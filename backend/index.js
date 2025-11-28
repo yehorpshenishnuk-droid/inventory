@@ -947,42 +947,54 @@ app.get("/api/inventory/products", async (req, res) => {
   try {
     const { date } = req.query;
 
-    // Если есть существующий лист — читаем его
-    if (date && await checkInventorySheetExists(date)) {
-      const inventoryData = await readInventorySheetData(date);
-
-      if (inventoryData) {
-        const grouped = groupInventory(inventoryData);
-        return res.json({
-          data: grouped,
-          existingInventory: true,
-          date
-        });
-      }
-    }
-
-    // Иначе читаем шаблон + всі продукти
+    // Завантажуємо шаблон + всі продукти
     const products = await readProductsFromSheet();
     const allProducts = await readAllProductsFromPoster();
     
     console.log(`📊 Завантажено продуктів з "№ Холод-ID": ${products.length}`);
     console.log(`📊 Завантажено продуктів з "Всі ID": ${allProducts.length}`);
     
-    // Объединяем: сначала продукты с локациями, потом все продукты
+    // Об'єднуємо
     const combined = [...products, ...allProducts];
     
     console.log(`📊 Загальна кількість після об'єднання: ${combined.length}`);
+
+    // Якщо є існуюча інвентаризація — підтягуємо збережені кількості
+    if (date && await checkInventorySheetExists(date)) {
+      const savedData = await readInventorySheetData(date);
+      
+      if (savedData && savedData.length > 0) {
+        console.log(`💾 Завантажено збережених даних: ${savedData.length} записів`);
+        
+        // Створюємо мапу збережених даних: "fridgeNumber-productName" -> quantity
+        const savedMap = new Map();
+        savedData.forEach(item => {
+          const key = `${item.fridge}-${item.name}`;
+          savedMap.set(key, item.quantity);
+        });
+        
+        // Оновлюємо quantity в шаблоні
+        combined.forEach(product => {
+          const key = `${product.fridge}-${product.name}`;
+          if (savedMap.has(key)) {
+            product.quantity = savedMap.get(key);
+            console.log(`  ✅ Оновлено: ${product.name} (${product.fridge}) = ${product.quantity}`);
+          }
+        });
+      }
+    }
     
     const grouped = groupInventory(combined);
     
     console.log(`📊 Холодильників створено: ${grouped.length}`);
     grouped.forEach(fridge => {
-      console.log(`  - ${fridge.fridgeNumber}: ${fridge.products.length} позицій`);
+      const filledCount = fridge.products.filter(p => p.savedQuantity && p.savedQuantity !== "").length;
+      console.log(`  - ${fridge.fridgeNumber}: ${fridge.products.length} позицій (${filledCount} заповнених)`);
     });
 
     res.json({
       data: grouped,
-      existingInventory: false
+      existingInventory: date && await checkInventorySheetExists(date)
     });
 
   } catch (err) {

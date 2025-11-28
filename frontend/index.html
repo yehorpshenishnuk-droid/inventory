@@ -333,6 +333,53 @@
       cursor: not-allowed;
     }
     
+    /* Кнопка синхронізації */
+    .sync-button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 18px 30px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 1.1em;
+      font-weight: bold;
+      margin-bottom: 25px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      transition: all 0.3s;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    
+    .sync-button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    }
+    
+    .sync-button:disabled {
+      cursor: not-allowed;
+    }
+    
+    .sync-icon {
+      font-size: 1.3em;
+    }
+    
+    .sync-text {
+      flex: 1;
+    }
+    
+    .sync-status {
+      font-size: 0.9em;
+      font-weight: normal;
+    }
+    
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    
     /* Прогрес */
     .progress-bar {
       background: #f0f0f0;
@@ -550,10 +597,12 @@
     const SHELVES = ['3', '4', '8', '16']; // Номери стелажів
     
     function getFridgeType(number) {
+      if (number === 'ALL') return 'Усі продукти';
       return SHELVES.includes(String(number)) ? 'Стелаж' : 'Холодильник';
     }
     
     function getFridgeIcon(number) {
+      if (number === 'ALL') return '📋';
       return SHELVES.includes(String(number)) ? '📦' : '❄️';
     }
 
@@ -701,9 +750,9 @@
       
       inventoryDate = dateInput;
       
-      // Закрываем модалку с датой, открываем модалку синхронизации
+      // Закрываем модалку с датой и сразу начинаем инвентаризацию
       document.getElementById("date-modal").classList.remove("active");
-      document.getElementById("sync-modal").classList.add("active");
+      startInventory();
     }
     
     // === ПОЧАТИ З СИНХРОНІЗАЦІЄЮ ===
@@ -762,6 +811,58 @@
     async function startWithoutSync() {
       document.getElementById("sync-modal").classList.remove("active");
       await startInventory();
+    }
+    
+    // === СИНХРОНІЗАЦІЯ З POSTER (кнопка на главном экране) ===
+    
+    async function syncWithPoster() {
+      const button = document.querySelector(".sync-button");
+      const statusEl = document.getElementById("inline-sync-status");
+      const syncIcon = button.querySelector(".sync-icon");
+      
+      // Блокируем кнопку
+      button.disabled = true;
+      button.style.opacity = "0.6";
+      syncIcon.style.animation = "spin 1s linear infinite";
+      
+      statusEl.textContent = "Синхронізація...";
+      statusEl.style.color = "#666";
+      
+      try {
+        // Синхронизируем все ID
+        const response = await fetch(`${API_URL}/api/sync-all-ids`);
+        const result = await response.json();
+        
+        if (!result.success) {
+          throw new Error(result.message || "Помилка синхронізації");
+        }
+        
+        // Показываем результат
+        const total = result.total || 0;
+        statusEl.textContent = `✅ Оновлено ${total} позицій`;
+        statusEl.style.color = "#10b981";
+        
+        // Через 3 секунды скрываем статус
+        setTimeout(() => {
+          statusEl.textContent = "";
+          button.disabled = false;
+          button.style.opacity = "1";
+          syncIcon.style.animation = "";
+        }, 3000);
+        
+      } catch (error) {
+        console.error("Помилка синхронізації:", error);
+        statusEl.textContent = `❌ Помилка: ${error.message}`;
+        statusEl.style.color = "#ef4444";
+        
+        // Разблокируем кнопку через 3 секунды
+        setTimeout(() => {
+          statusEl.textContent = "";
+          button.disabled = false;
+          button.style.opacity = "1";
+          syncIcon.style.animation = "";
+        }, 3000);
+      }
     }
     
     // === ОСНОВНА ЛОГІКА ===
@@ -853,10 +954,31 @@
       const selector = document.getElementById("fridge-selector");
       selector.innerHTML = "";
       
+      // Добавляем кнопку синхронизации
+      const syncButton = document.createElement("button");
+      syncButton.className = "sync-button";
+      syncButton.innerHTML = `
+        <span class="sync-icon">🔄</span>
+        <span class="sync-text">Синхронізувати з Poster</span>
+        <span class="sync-status" id="inline-sync-status"></span>
+      `;
+      syncButton.style.gridColumn = "1 / -1";
+      syncButton.onclick = syncWithPoster;
+      selector.appendChild(syncButton);
+      
       // Отримуємо всі блокування
       const locks = await getAllLocationLocks();
       
       allFridges.forEach(fridge => {
+        // Пропускаем пустые холодильники и "Без холодильника"
+        if (!fridge.fridgeNumber || 
+            fridge.fridgeNumber === '' || 
+            fridge.fridgeNumber === 'Без холодильника' ||
+            fridge.fridgeNumber === '#N/A' ||
+            fridge.fridgeNumber === 'undefined') {
+          return;
+        }
+        
         const card = document.createElement("div");
         card.className = "fridge-card";
         
@@ -873,7 +995,7 @@
         
         card.innerHTML = `
           <div class="fridge-icon">${getFridgeIcon(fridge.fridgeNumber)}</div>
-          <div class="fridge-number">${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}</div>
+          <div class="fridge-number">${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber === 'ALL' ? '' : fridge.fridgeNumber}</div>
           <div class="fridge-count">${fridge.products.length} позицій</div>
           ${hasData ? '<div style="margin-top: 10px;">✅ Заповнено</div>' : ''}
           ${isLockedByOther ? `<div style="margin-top: 10px; color: #ef4444;">🔒 Рахує: ${lock.userName}</div>` : ''}

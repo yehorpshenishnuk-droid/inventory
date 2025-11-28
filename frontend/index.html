@@ -679,18 +679,27 @@
     // Заблокувати холодильник/стелаж
     async function lockLocation(locationNumber) {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд timeout
+        
         const response = await fetch(`${API_URL}/api/locks/lock`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             locationNumber: String(locationNumber),
             userName: currentUserName
-          })
+          }),
+          signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
         return await response.json();
       } catch (error) {
         console.error("Помилка блокування:", error);
-        return { success: false, error: error.message };
+        if (error.name === 'AbortError') {
+          return { success: false, error: "Timeout - сервер не відповідає" };
+        }
+        return { success: false, error: error.message || "Помилка підключення" };
       }
     }
     
@@ -956,12 +965,34 @@
         return;
       }
       
-      // Блокуємо холодильник
-      const lockResult = await lockLocation(fridge.fridgeNumber);
-      if (!lockResult.success && lockResult.error) {
-        alert(`❌ Помилка блокування: ${lockResult.error}\n\nСпробуйте ще раз або зачекайте хвилину.`);
+      // Блокуємо холодильник з retry
+      let lockResult = null;
+      let attempts = 0;
+      const maxAttempts = 3;
+      
+      while (attempts < maxAttempts && (!lockResult || !lockResult.success)) {
+        attempts++;
+        console.log(`🔒 Спроба блокування ${attempts}/${maxAttempts}...`);
+        
+        lockResult = await lockLocation(fridge.fridgeNumber);
+        
+        if (lockResult.success) {
+          break;
+        }
+        
+        // Якщо не остання спроба - чекаємо 1 секунду
+        if (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      if (!lockResult || !lockResult.success) {
+        const errorMsg = lockResult?.error || "Не вдалося підключитися до сервера";
+        alert(`❌ Помилка блокування: ${errorMsg}\n\nСпробовано ${maxAttempts} разів.\nСпробуйте ще раз або перезавантажте сторінку.`);
         return;
       }
+      
+      console.log("✅ Холодильник заблоковано успішно");
       
       // 🔄 ЗАВАНТАЖУЄМО СВІЖІ ДАНІ З СЕРВЕРА
       console.log("🔄 Завантажую свіжі дані для дати:", inventoryDate);
@@ -1064,6 +1095,9 @@
               placeholder="0 або 1+2"
               value="${quantity}"
               data-product-name="${product.name}"
+              data-product-category="${product.category || ''}"
+              data-product-type="${product.type || ''}"
+              data-product-unit="${product.unit || 'кг'}"
               data-unit="${product.unit || 'кг'}"
               class="${quantity !== '' ? 'filled' : ''}"
               oninput="handleInput(this)"
@@ -1204,10 +1238,16 @@
       
       inputs.forEach(input => {
         const productName = input.getAttribute("data-product-name");
+        const productCategory = input.getAttribute("data-product-category");
+        const productType = input.getAttribute("data-product-type");
+        const productUnit = input.getAttribute("data-product-unit");
         const quantity = input.value;
         
         products.push({
           name: productName,
+          category: productCategory || "",
+          type: productType || "",
+          unit: productUnit || "кг",
           quantity: quantity
         });
       });
@@ -1235,6 +1275,9 @@
             .filter(p => p.quantity !== "")
             .map(p => ({
               name: p.name,
+              category: p.category || "",
+              type: p.type || "",
+              unit: p.unit || "кг",
               quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
             }))
         }];
@@ -1382,6 +1425,9 @@
             .filter(p => p.quantity !== "") // Відфільтровуємо порожні
             .map(p => ({
               name: p.name,
+              category: p.category || "",
+              type: p.type || "",
+              unit: p.unit || "кг",
               quantity: parseFloat(p.quantity.replace(/,/g, '.')) || 0
             }))
         })).filter(f => f.products.length > 0); // Тільки холодильники з даними

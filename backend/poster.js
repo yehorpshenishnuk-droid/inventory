@@ -197,11 +197,26 @@ export async function getAllPosterItems() {
   // Фильтруем напівфабрикати - исключаем П/Ф бара (напитки)
   const filteredPrepacks = prepacks.filter(p => {
     const name = p.product_name.toLowerCase();
+    
+    // Исключаем алкоголь
+    if (name.includes("наливка") || name.includes("лікер")) {
+      return false;
+    }
+    
+    // Исключаем напитки
+    if (name.includes("узвар") || name.includes("компот")) {
+      return false;
+    }
+    
     // Исключаем если название начинается с "п/ф" и содержит напитки
     if (name.startsWith("п/ф")) {
-      const drinkKeywords = ["лимонад", "облипиха", "клюква", "малина", "смородина", "чай", "соска"];
+      const drinkKeywords = [
+        "лимонад", "облипиха", "обліпиха", "клюква", "клубника", "полуниця",
+        "малина", "смородина", "чай", "соска", "фреш", "сік", "сок"
+      ];
       return !drinkKeywords.some(keyword => name.includes(keyword));
     }
+    
     return true;
   });
 

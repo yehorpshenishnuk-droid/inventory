@@ -531,7 +531,7 @@
     <!-- Екран списку продуктів -->
     <div id="product-list">
       <div class="top-buttons">
-        <button class="back-btn" onclick="showFridgeSelector()">← Назад</button>
+        <button class="back-btn" onclick="saveAndGoBack()">← Назад</button>
       </div>
       <h2 id="current-fridge-title"></h2>
       
@@ -1264,6 +1264,38 @@
       setTimeout(() => {
         showFridgeSelector();
       }, 1500);
+    }
+    
+    // Зберегти дані і повернутися назад (для кнопки "Назад")
+    async function saveAndGoBack() {
+      const inputs = document.querySelectorAll("#products-container input");
+      const products = [];
+      
+      inputs.forEach(input => {
+        const productName = input.getAttribute("data-product-name");
+        const productCategory = input.getAttribute("data-product-category");
+        const productType = input.getAttribute("data-product-type");
+        const productUnit = input.getAttribute("data-product-unit");
+        const quantity = input.value;
+        
+        products.push({
+          name: productName,
+          category: productCategory || "",
+          type: productType || "",
+          unit: productUnit || "кг",
+          quantity: quantity
+        });
+      });
+      
+      inventoryData[currentFridge.fridgeNumber] = products;
+      hasUnsavedChanges = false;
+      saveDraft();
+      
+      // ✅ ЗБЕРІГАЄМО В GOOGLE SHEETS БЕЗ ПОВІДОМЛЕННЯ
+      await saveToGoogleSheetsSync();
+      
+      // Одразу повертаємося назад
+      showFridgeSelector();
     }
     
     // Синхронізація поточного холодильника з Google Sheets

@@ -276,6 +276,11 @@ export async function readProductsFromSheet() {
           .forEach((v) => locations.push(v));
       }
 
+      // Якщо немає локацій - пропускаємо продукт
+      if (locations.length === 0) {
+        return;
+      }
+
       locations.forEach((loc) =>
         result.push({
           rowIndex: i + 2,

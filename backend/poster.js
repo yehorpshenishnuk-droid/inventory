@@ -145,26 +145,7 @@ export async function getPosterIngredients() {
 // ================================
 
 export async function getAllPosterItems() {
-  console.log("📡 Загружаю данные из Poster...");
-
-  // ID категорій КУХНІ - ТІЛЬКИ ЦІ виводимо
-  const HOT_CATEGORIES = [4, 13, 15, 46, 33];
-  const COLD_CATEGORIES = [7, 8, 11, 16, 18, 19, 29, 32, 36, 44];
-  const KITCHEN_CATEGORIES = [...HOT_CATEGORIES, ...COLD_CATEGORIES];
-
-  // Категорії інгредієнтів БАРУ - виключаємо по назві
-  const BAR_INGREDIENT_CATEGORIES = [
-    "ДЖИН",
-    "ВІСКІ", 
-    "ГОРІЛКА",
-    "СІК БАР",
-    "СИРОП RIOBA",
-    "ПИВО",
-    "БАР МОРОЗКА",
-    "ВИНО",
-    "ВИНО ИГРИСТЕ",
-    "БРЕНДІ"
-  ];
+  console.log("📡 Загружаю АБСОЛЮТНО ВСІ данные из Poster (кухня + бар)...");
 
   const [products, prepacks, ingredients] = await Promise.all([
     getPosterProducts(),
@@ -177,48 +158,16 @@ export async function getAllPosterItems() {
   const techCards = [];
 
   products.forEach(item => {
-    // Берем ТОЛЬКО категории кухни
-    if (KITCHEN_CATEGORIES.includes(Number(item.category_id))) {
-      if (item.item_type === "2") techCards.push(item);
-      else regularProducts.push(item);
-    }
+    // ✅ БЕРЕМО ВСІ продукти БЕЗ ФІЛЬТРІВ
+    if (item.item_type === "2") techCards.push(item);
+    else regularProducts.push(item);
   });
 
-  // Фильтруем ингредиенты - берем ТОЛЬКО кухню И исключаем бар по названию
-  const filteredIngredients = ingredients.filter(i => {
-    // Должна быть категория кухни
-    const isKitchenCategory = KITCHEN_CATEGORIES.includes(Number(i.category_id));
-    // И НЕ должна быть барная категория по названию
-    const isBarCategory = BAR_INGREDIENT_CATEGORIES.includes(i.category_name);
-    
-    return isKitchenCategory && !isBarCategory;
-  });
+  // ✅ БЕРЕМО ВСІ інгредієнти БЕЗ ФІЛЬТРІВ
+  const filteredIngredients = ingredients;
 
-  // Фильтруем напівфабрикати - исключаем П/Ф бара (напитки)
-  const filteredPrepacks = prepacks.filter(p => {
-    const name = p.product_name.toLowerCase();
-    
-    // Исключаем алкоголь
-    if (name.includes("наливка") || name.includes("лікер")) {
-      return false;
-    }
-    
-    // Исключаем напитки
-    if (name.includes("узвар") || name.includes("компот")) {
-      return false;
-    }
-    
-    // Исключаем если название начинается с "п/ф" и содержит напитки
-    if (name.startsWith("п/ф")) {
-      const drinkKeywords = [
-        "лимонад", "облипиха", "обліпиха", "клюква", "клубника", "полуниця",
-        "малина", "смородина", "чай", "соска", "фреш", "сік", "сок"
-      ];
-      return !drinkKeywords.some(keyword => name.includes(keyword));
-    }
-    
-    return true;
-  });
+  // ✅ БЕРЕМО ВСІ напівфабрикати БЕЗ ФІЛЬТРІВ
+  const filteredPrepacks = prepacks;
 
   const allItems = [
     ...regularProducts.map(p => ({

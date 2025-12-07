@@ -315,6 +315,7 @@ export async function readAllProductsFromPoster() {
     rows.forEach((row, i) => {
       const productId = (row[0] && !isNaN(Number(row[0]))) ? Number(row[0]) : null;
       const name = row[1] || "";
+      const category = row[2] || ""; // ✅ БЕРЕМО КАТЕГОРІЮ з колонки C
       const type = row[3] || "";
       
       // Визначаємо одиниці виміру по ID
@@ -325,7 +326,7 @@ export async function readAllProductsFromPoster() {
           rowIndex: i + 2,
           fridge: "ALL", // Специальный маркер для "Усі продукти"
           name: name,
-          category: "", // Категорію не берём
+          category: category, // ✅ Категорія з Poster
           type: type,
           unit: unit,
           quantity: "",
@@ -336,6 +337,68 @@ export async function readAllProductsFromPoster() {
     return result;
   } catch (err) {
     console.error("Ошибка readAllProductsFromPoster:", err);
+    throw err;
+  }
+}
+
+// ====================== ЧИТАННЯ "Сводна № Холод" ======================= //
+
+export async function readSummarySheet() {
+  try {
+    console.log("📊 Читаю 'Сводна № Холод'...");
+    
+    // Читаємо весь лист
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Сводна № Холод!A2:S1000`, // ID + 19 колонок (Х1-Х18 + можливо більше)
+    });
+
+    const rows = resp.data.values || [];
+    const products = [];
+
+    rows.forEach((row, i) => {
+      const idWithSuffix = row[0] || "";
+      
+      // Пропускаємо порожні та "-"
+      if (!idWithSuffix || idWithSuffix === "-") return;
+      
+      // Парсимо ID (прибираємо суфікс -Т/-Н/-І)
+      const match = idWithSuffix.match(/^(\d+)-[ТНІ]$/);
+      if (!match) return;
+      
+      const productId = Number(match[1]);
+      
+      // Визначаємо одиниці виміру
+      const unit = ITEMS_IN_PIECES.includes(productId) ? "шт" : "кг";
+      
+      // Перевіряємо в яких холодильниках є продукт (де 1)
+      const fridges = [];
+      
+      // Колонки B-S (indices 1-18)
+      const fridgeNames = ['X1', 'X2', 'X3', 'C4', 'X5', 'X6', 'X7', 'C8', 'X10', 'X11', 'X12', 'X13', 'X14', 'C15', 'C16', 'X17', 'X18', 'X19'];
+      
+      for (let j = 1; j < row.length && j <= 18; j++) {
+        if (row[j] === '1') {
+          fridges.push(fridgeNames[j - 1]);
+        }
+      }
+      
+      // Додаємо продукт для КОЖНОГО холодильника де він є
+      fridges.forEach(fridge => {
+        products.push({
+          productId: productId,
+          fridge: fridge,
+          unit: unit,
+          rowIndex: i + 2
+        });
+      });
+    });
+
+    console.log(`✅ Знайдено ${products.length} записів з 'Сводна № Холод'`);
+    return products;
+    
+  } catch (err) {
+    console.error("❌ Помилка readSummarySheet:", err);
     throw err;
   }
 }

@@ -956,24 +956,33 @@ app.get("/api/inventory/products", async (req, res) => {
     const allProducts = await readAllProductsFromPoster();
     console.log(`📊 Завантажено з "Всі ID з Poster": ${allProducts.length} продуктів`);
     
-    // ✅ СТВОРЮЄМО МАПУ: ID -> product info
+    // ✅ СТВОРЮЄМО МАПУ: ID з суфіксом -> product info
     const productMap = new Map();
     
-    // Читаємо СПОЧАТКУ рядки з листа щоб отримати ID
-    const resp = await sheets.spreadsheets.values.get({
+    // Читаємо лист "Всі ID з Poster" включно з суфіксами
+    const respPoster = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `Всі ID з Poster!A2:D1000`,
     });
     
-    const rows = resp.data.values || [];
-    rows.forEach((row, i) => {
-      const productId = row[0] ? Number(row[0]) : null;
+    const rowsPoster = respPoster.data.values || [];
+    rowsPoster.forEach((row, i) => {
+      const productIdRaw = row[0] || ""; // Може бути "153" або пусто
       const name = row[1] || "";
       const category = row[2] || "";
       const type = row[3] || "";
       
-      if (productId && name) {
-        productMap.set(productId, {
+      if (name) {
+        // Створюємо ключ: ID + визначаємо суфікс по типу
+        let suffix = "";
+        if (type === "Тех.карта") suffix = "-Т";
+        else if (type === "Напівфабрикат") suffix = "-Н";
+        else if (type === "Інгредієнт") suffix = "-І";
+        else if (type === "Продукт меню") suffix = "-Т";
+        
+        const fullId = productIdRaw ? `${productIdRaw}${suffix}` : name;
+        
+        productMap.set(fullId, {
           name,
           category,
           type
@@ -982,17 +991,20 @@ app.get("/api/inventory/products", async (req, res) => {
     });
     
     console.log(`📋 Створено мапу: ${productMap.size} продуктів`);
+    console.log(`🔍 Приклад з мапи:`, Array.from(productMap.entries()).slice(0, 5));
+    console.log(`🔍 Приклад з summaryData:`, summaryData.slice(0, 5));
     
     // ✅ ОБ'ЄДНУЄМО: додаємо назви/категорії до summaryData
     const combined = summaryData.map(item => {
-      const productInfo = productMap.get(item.productId) || {
-        name: `Продукт ${item.productId}`,
+      const productInfo = productMap.get(item.fullId) || {
+        name: `${item.fullId}`, // Показуємо fullId якщо не знайдено
         category: "Невідомо",
         type: ""
       };
       
       return {
         productId: item.productId,
+        fullId: item.fullId,
         fridge: item.fridge,
         name: productInfo.name,
         category: productInfo.category,

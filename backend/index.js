@@ -1069,7 +1069,16 @@ function groupInventory(products) {
     });
   });
 
-  return Object.keys(fridges).map(loc => ({
+  // ✅ СОРТУЄМО холодильники по номеру
+  const sortedKeys = Object.keys(fridges).sort((a, b) => {
+    // Витягуємо числа з назв (X1, X2, C4, X10...)
+    const numA = parseInt(a.replace(/[^\d]/g, '')) || 999;
+    const numB = parseInt(b.replace(/[^\d]/g, '')) || 999;
+    
+    return numA - numB;
+  });
+
+  return sortedKeys.map(loc => ({
     fridgeNumber: loc,
     products: fridges[loc]
   }));

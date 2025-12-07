@@ -4,6 +4,7 @@ import cors from "cors";
 import {
   readProductsFromSheet,
   readAllProductsFromPoster,
+  readSummarySheet,
   createInventorySheet,
   writeQuantitiesToInventorySheet,
   writeFinalInventoryReport,
@@ -947,17 +948,62 @@ app.get("/api/inventory/products", async (req, res) => {
   try {
     const { date } = req.query;
 
-    // Завантажуємо шаблон + всі продукти
-    const products = await readProductsFromSheet();
+    // ✅ ЧИТАЄМО "Сводна № Холод" - тут розподіл по холодильникам
+    const summaryData = await readSummarySheet();
+    console.log(`📊 Завантажено з "Сводна № Холод": ${summaryData.length} записів`);
+    
+    // ✅ ЧИТАЄМО "Всі ID з Poster" - тут назви/категорії
     const allProducts = await readAllProductsFromPoster();
+    console.log(`📊 Завантажено з "Всі ID з Poster": ${allProducts.length} продуктів`);
     
-    console.log(`📊 Завантажено продуктів з "№ Холод-ID": ${products.length}`);
-    console.log(`📊 Завантажено продуктів з "Всі ID": ${allProducts.length}`);
+    // ✅ СТВОРЮЄМО МАПУ: ID -> product info
+    const productMap = new Map();
     
-    // Об'єднуємо
-    const combined = [...products, ...allProducts];
+    // Читаємо СПОЧАТКУ рядки з листа щоб отримати ID
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Всі ID з Poster!A2:D1000`,
+    });
     
-    console.log(`📊 Загальна кількість після об'єднання: ${combined.length}`);
+    const rows = resp.data.values || [];
+    rows.forEach((row, i) => {
+      const productId = row[0] ? Number(row[0]) : null;
+      const name = row[1] || "";
+      const category = row[2] || "";
+      const type = row[3] || "";
+      
+      if (productId && name) {
+        productMap.set(productId, {
+          name,
+          category,
+          type
+        });
+      }
+    });
+    
+    console.log(`📋 Створено мапу: ${productMap.size} продуктів`);
+    
+    // ✅ ОБ'ЄДНУЄМО: додаємо назви/категорії до summaryData
+    const combined = summaryData.map(item => {
+      const productInfo = productMap.get(item.productId) || {
+        name: `Продукт ${item.productId}`,
+        category: "Невідомо",
+        type: ""
+      };
+      
+      return {
+        productId: item.productId,
+        fridge: item.fridge,
+        name: productInfo.name,
+        category: productInfo.category,
+        type: productInfo.type,
+        unit: item.unit,
+        quantity: "",
+        rowIndex: item.rowIndex
+      };
+    });
+    
+    console.log(`📊 Об'єднано: ${combined.length} записів`);
 
     // Якщо є існуюча інвентаризація — підтягуємо збережені кількості
     if (date && await checkInventorySheetExists(date)) {
@@ -998,6 +1044,7 @@ app.get("/api/inventory/products", async (req, res) => {
     });
 
   } catch (err) {
+    console.error("❌ Помилка /api/inventory/products:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

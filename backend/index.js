@@ -968,10 +968,22 @@ app.get("/api/inventory/products", async (req, res) => {
     const rowsPoster = respPoster.data.values || [];
     rowsPoster.forEach((row, i) => {
       const productIdRaw = row[0] || ""; // Колонка A: числовий ID
-      const fullId = row[1] || ""; // ✅ Колонка B: ПОВНИЙ ID з суфіксом (153-Н, 153-І)
+      let fullId = row[1] || ""; // ✅ Колонка B: ПОВНИЙ ID з суфіксом (153-Н, 153-І)
       const name = row[2] || ""; // Колонка C: Назва
       const category = row[3] || ""; // Колонка D: Категорія
       const type = row[4] || ""; // Колонка E: Тип
+      
+      // ✅ НОРМАЛІЗАЦІЯ: Заміна латинських літер на українські
+      if (fullId) {
+        fullId = fullId.replace(/T/g, 'Т')
+                       .replace(/H/g, 'Н')
+                       .replace(/I/g, 'І')
+                       .replace(/P/g, 'П')
+                       .replace(/t/g, 'т')
+                       .replace(/h/g, 'н')
+                       .replace(/i/g, 'і')
+                       .replace(/p/g, 'п');
+      }
       
       if (fullId && name) {
         // ✅ НЕ ПЕРЕЗАПИСУЄМО! Зберігаємо тільки перший запис

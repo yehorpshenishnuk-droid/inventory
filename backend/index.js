@@ -962,7 +962,7 @@ app.get("/api/inventory/products", async (req, res) => {
     // Читаємо лист "Всі ID з Poster" з колонкою B (Уникальні ID)
     const respPoster = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Всі ID з Poster!A2:E1000`, // ✅ Беремо 5 колонок!
+      range: `Всі ID з Poster!A2:E`, // ✅ Читаємо всі рядки без обмеження
     });
     
     const rowsPoster = respPoster.data.values || [];

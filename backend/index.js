@@ -975,18 +975,21 @@ app.get("/api/inventory/products", async (req, res) => {
       if (name) {
         // Створюємо ключ: ID + визначаємо суфікс по типу
         let suffix = "";
-        if (type === "Тех.карта") suffix = "-Т";
+        if (type === "Тех.карта" || type === "Продукт меню") suffix = "-Т";
         else if (type === "Напівфабрикат") suffix = "-Н";
         else if (type === "Інгредієнт") suffix = "-І";
-        else if (type === "Продукт меню") suffix = "-Т";
+        else if (type === "Продукт") suffix = "-П";
         
         const fullId = productIdRaw ? `${productIdRaw}${suffix}` : name;
         
-        productMap.set(fullId, {
-          name,
-          category,
-          type
-        });
+        // ✅ НЕ ПЕРЕЗАПИСУЄМО! Зберігаємо тільки перший запис
+        if (!productMap.has(fullId)) {
+          productMap.set(fullId, {
+            name,
+            category,
+            type
+          });
+        }
       }
     });
     

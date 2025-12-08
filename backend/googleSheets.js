@@ -350,7 +350,7 @@ export async function readSummarySheet() {
     // Читаємо весь лист (без обмеження на кількість рядків)
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Сводна № Холod!A2:T`, // ID + 19 колонок (B-T) - читає всі рядки до кінця включно з X19
+      range: `Сводна № Холод!A2:T`, // ID + 19 колонок (B-T) - читає всі рядки до кінця включно з X19
     });
 
     const rows = resp.data.values || [];

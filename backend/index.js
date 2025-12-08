@@ -959,29 +959,21 @@ app.get("/api/inventory/products", async (req, res) => {
     // ✅ СТВОРЮЄМО МАПУ: ID з суфіксом -> product info
     const productMap = new Map();
     
-    // Читаємо лист "Всі ID з Poster" включно з суфіксами
+    // Читаємо лист "Всі ID з Poster" з колонкою B (Уникальні ID)
     const respPoster = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `Всі ID з Poster!A2:D1000`,
+      range: `Всі ID з Poster!A2:E1000`, // ✅ Беремо 5 колонок!
     });
     
     const rowsPoster = respPoster.data.values || [];
     rowsPoster.forEach((row, i) => {
-      const productIdRaw = row[0] || ""; // Може бути "153" або пусто
-      const name = row[1] || "";
-      const category = row[2] || "";
-      const type = row[3] || "";
+      const productIdRaw = row[0] || ""; // Колонка A: числовий ID
+      const fullId = row[1] || ""; // ✅ Колонка B: ПОВНИЙ ID з суфіксом (153-Н, 153-І)
+      const name = row[2] || ""; // Колонка C: Назва
+      const category = row[3] || ""; // Колонка D: Категорія
+      const type = row[4] || ""; // Колонка E: Тип
       
-      if (name) {
-        // Створюємо ключ: ID + визначаємо суфікс по типу
-        let suffix = "";
-        if (type === "Тех.карта" || type === "Продукт меню") suffix = "-Т";
-        else if (type === "Напівфабрикат") suffix = "-Н";
-        else if (type === "Інгредієнт") suffix = "-І";
-        else if (type === "Продукт") suffix = "-П";
-        
-        const fullId = productIdRaw ? `${productIdRaw}${suffix}` : name;
-        
+      if (fullId && name) {
         // ✅ НЕ ПЕРЕЗАПИСУЄМО! Зберігаємо тільки перший запис
         if (!productMap.has(fullId)) {
           productMap.set(fullId, {

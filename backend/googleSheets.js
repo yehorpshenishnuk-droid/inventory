@@ -362,13 +362,24 @@ export async function readSummarySheet() {
       // Пропускаємо порожні та "-"
       if (!idWithSuffix || idWithSuffix === "-") return;
       
-      // Парсимо ID (НЕ прибираємо суфікс!)
-      const match = idWithSuffix.match(/^(\d+)-([ТНІ])$/);
-      if (!match) return;
+      // ✅ ПРИЙМАЄМО ВСІ ВАРІАНТИ: українські ТНІПтніп, латинські THIPthip
+      const match = idWithSuffix.match(/^(\d+)-([ТНІПтніпTHIPthip])$/);
+      if (!match) {
+        console.log(`⚠️ Пропущено невалідний ID: "${idWithSuffix}"`);
+        return;
+      }
       
       const productId = Number(match[1]);
-      const suffix = match[2];
-      const fullId = `${productId}-${suffix}`; // ✅ ЗБЕРІГАЄМО ПОВНИЙ ID
+      const suffixRaw = match[2].toUpperCase(); // Приводимо до великої
+      
+      // Нормалізуємо суфікс до українських літер
+      let suffix = suffixRaw;
+      if (suffixRaw === 'T') suffix = 'Т';
+      if (suffixRaw === 'H') suffix = 'Н'; 
+      if (suffixRaw === 'I') suffix = 'І';
+      if (suffixRaw === 'P') suffix = 'П';
+      
+      const fullId = `${productId}-${suffix}`;
       
       // Визначаємо одиниці виміру
       const unit = ITEMS_IN_PIECES.includes(productId) ? "шт" : "кг";

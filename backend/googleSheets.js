@@ -387,10 +387,10 @@ export async function readSummarySheet() {
       // Перевіряємо в яких холодильниках є продукт (де 1)
       const fridges = [];
       
-      // Колонки B-S (indices 1-18)
-      const fridgeNames = ['X1', 'X2', 'X3', 'C4', 'X5', 'X6', 'X7', 'C8', 'X10', 'X11', 'X12', 'X13', 'X14', 'C15', 'C16', 'X17', 'X18', 'X19'];
+      // Колонки B-S (indices 1-19)
+      const fridgeNames = ['X1', 'X2', 'X3', 'C4', 'X5', 'X6', 'X7', 'C8', 'X9', 'X10', 'X11', 'X12', 'X13', 'X14', 'C15', 'C16', 'X17', 'X18', 'X19'];
       
-      for (let j = 1; j < row.length && j <= 18; j++) {
+      for (let j = 1; j < row.length && j <= 19; j++) {
         if (row[j] === '1') {
           fridges.push(fridgeNames[j - 1]);
         }

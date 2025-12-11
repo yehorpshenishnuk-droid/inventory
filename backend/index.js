@@ -1088,8 +1088,35 @@ function groupInventory(products) {
     });
   });
 
-  // ✅ СОРТУЄМО холодильники по номеру
+  // ✅ ДОДАЄМО ХОЛОДИЛЬНИК "ВСІ" з усіма унікальними позиціями
+  const allProductsMap = new Map();
+  
+  products.forEach(item => {
+    // Використовуємо назву як ключ для унікальності
+    if (!allProductsMap.has(item.name)) {
+      allProductsMap.set(item.name, {
+        name: item.name,
+        category: item.category,
+        type: item.type,
+        unit: item.unit || "кг",
+        currentQuantity: item.quantity || "",
+        savedQuantity: item.quantity || "",
+        rowIndex: item.rowIndex
+      });
+    }
+  });
+  
+  // Додаємо холодильник "ВСІ" зі всіма унікальними позиціями
+  fridges['ВСІ'] = Array.from(allProductsMap.values()).sort((a, b) => 
+    a.name.localeCompare(b.name, 'uk')
+  );
+
+  // ✅ СОРТУЄМО холодильники: спочатку "ВСІ", потім по номеру
   const sortedKeys = Object.keys(fridges).sort((a, b) => {
+    // "ВСІ" завжди першим
+    if (a === 'ВСІ') return -1;
+    if (b === 'ВСІ') return 1;
+    
     // Витягуємо числа з назв (X1, X2, C4, X10...)
     const numA = parseInt(a.replace(/[^\d]/g, '')) || 999;
     const numB = parseInt(b.replace(/[^\d]/g, '')) || 999;

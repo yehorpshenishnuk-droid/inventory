@@ -1198,7 +1198,7 @@ app.post("/api/inventory/save", async (req, res) => {
     const dataByFridge = {};
 
     inventoryData.forEach(fridge => {
-      // Використовуємо оригінальний код (X1, C4) для збереження
+      // Використовуємо оригінальний код (X1, C4, ВСІ) для збереження
       const fridgeCode = fridge.originalCode || fridge.fridgeNumber;
       
       // Копіюємо існуючі дані для цього холодильника

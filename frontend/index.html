@@ -130,6 +130,7 @@
       font-size: 1.5em;
       font-weight: bold;
       margin-bottom: 10px;
+      white-space: nowrap; /* Не розбивати текст на рядки */
     }
     
     .fridge-count {
@@ -573,17 +574,16 @@
     let isExistingInventory = false;
     let currentUserName = ""; // Ім'я поточного користувача
     
-    // Визначення типу холодильника/стелажа
-    const SHELVES = ['3', '4', '8', '16']; // Номери стелажів
-    
-    function getFridgeType(number) {
-      if (number === 'ALL') return 'Усі продукти';
-      return SHELVES.includes(String(number)) ? 'Стелаж' : 'Холодильник';
-    }
-    
-    function getFridgeIcon(number) {
-      if (number === 'ALL') return '📋';
-      return SHELVES.includes(String(number)) ? '📦' : '❄️';
+    // Іконки для холодильників
+    function getFridgeIcon(fridgeName) {
+      // Якщо це "ВСІ"
+      if (fridgeName === 'ВСІ') return '📋';
+      
+      // Якщо назва містить "Стелаж" - це стелаж
+      if (String(fridgeName).includes('Стелаж')) return '📦';
+      
+      // Інакше - холодильник
+      return '❄️';
     }
 
     // Перевірка авторизації
@@ -635,7 +635,7 @@
       
       const lockedInfo = document.getElementById("locked-info");
       lockedInfo.innerHTML = `
-        <strong>${lock.userName}</strong> зараз працює з <strong>${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}</strong><br>
+        <strong>${lock.userName}</strong> зараз працює з <strong>${fridge.fridgeNumber}</strong><br>
         <span style="color: #999; font-size: 0.9em;">Почав о ${lock.time}</span>
       `;
       
@@ -652,10 +652,11 @@
     async function forceUnlockAndOpen() {
       if (!pendingFridgeToUnlock) return;
       
-      console.log(`🔓 Примусове розблокування: ${pendingFridgeToUnlock.fridgeNumber}`);
+      const unlockCode = pendingFridgeToUnlock.originalCode || pendingFridgeToUnlock.fridgeNumber;
+      console.log(`🔓 Примусове розблокування: ${pendingFridgeToUnlock.fridgeNumber} (${unlockCode})`);
       
       // Розблокувати
-      await unlockLocation(pendingFridgeToUnlock.fridgeNumber);
+      await unlockLocation(unlockCode);
       
       // Закрити модальне вікно
       closeLockModal();
@@ -841,6 +842,13 @@
         allFridges = result.data || result;
         isExistingInventory = result.existingInventory || false;
         
+        // 🔍 ДІАГНОСТИКА: Подивимось що приходить з API
+        console.log("📊 Перші 3 холодильники з API:");
+        allFridges.slice(0, 3).forEach(f => {
+          console.log(`  - fridgeNumber: "${f.fridgeNumber}" (type: ${typeof f.fridgeNumber})`);
+          console.log(`    Символи:`, Array.from(f.fridgeNumber).map((c, i) => `${i}:'${c}'(${c.charCodeAt(0)})`).join(' '));
+        });
+        
         if (isExistingInventory) {
           // Якщо існує інвентаризація за цю дату, завантажуємо збережені дані
           allFridges.forEach(fridge => {
@@ -876,7 +884,8 @@
     async function showFridgeSelector() {
       // Розблокувати поточний холодильник якщо був відкритий
       if (currentFridge) {
-        await unlockLocation(currentFridge.fridgeNumber);
+        const unlockCode = currentFridge.originalCode || currentFridge.fridgeNumber;
+        await unlockLocation(unlockCode);
       }
       
       document.getElementById("fridge-selector").style.display = "grid";
@@ -926,13 +935,14 @@
           card.classList.add("selected");
         }
         
-        // Перевіряємо чи заблокований
-        const lock = locks[fridge.fridgeNumber];
+        // Перевіряємо чи заблокований (за originalCode)
+        const lockCode = fridge.originalCode || fridge.fridgeNumber;
+        const lock = locks[lockCode];
         const isLockedByOther = lock && lock.userName !== currentUserName;
         
         card.innerHTML = `
           <div class="fridge-icon">${getFridgeIcon(fridge.fridgeNumber)}</div>
-          <div class="fridge-number">${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber === 'ALL' ? '' : fridge.fridgeNumber}</div>
+          <div class="fridge-number">${fridge.fridgeNumber}</div>
           <div class="fridge-count">${fridge.products.length} позицій</div>
           ${hasData ? '<div style="margin-top: 10px;">✅ Заповнено</div>' : ''}
           ${isLockedByOther ? `<div style="margin-top: 10px; color: #ef4444;">🔒 Рахує: ${lock.userName}</div>` : ''}
@@ -965,7 +975,9 @@
         attempts++;
         console.log(`🔒 Спроба блокування ${attempts}/${maxAttempts}...`);
         
-        lockResult = await lockLocation(fridge.fridgeNumber);
+        // Використовуємо originalCode для блокування (X1, C4, тощо)
+        const lockCode = fridge.originalCode || fridge.fridgeNumber;
+        lockResult = await lockLocation(lockCode);
         
         if (lockResult.success) {
           break;

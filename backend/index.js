@@ -1051,6 +1051,37 @@ app.get("/api/inventory/products", async (req, res) => {
     
     const grouped = groupInventory(combined);
     
+    // ✅ ЗАВАНТАЖУЄМО ЗБЕРЕЖЕНІ ДАНІ ДЛЯ "ВСІ"
+    if (date && await checkInventorySheetExists(date)) {
+      const savedData = await readInventorySheetData(date);
+      
+      if (savedData && savedData.length > 0) {
+        // Знаходимо холодильник "ВСІ"
+        const vsiFridge = grouped.find(f => f.originalCode === 'ВСІ' || f.fridgeNumber === 'ВСІ');
+        
+        if (vsiFridge) {
+          console.log(`🔄 Завантажуємо збережені дані для "ВСІ"...`);
+          
+          // Створюємо мапу збережених даних тільки для "ВСІ"
+          const vsiSavedMap = new Map();
+          savedData.forEach(item => {
+            if (item.fridge === 'ВСІ') {
+              vsiSavedMap.set(item.name, item.quantity);
+            }
+          });
+          
+          // Оновлюємо quantity в "ВСІ"
+          vsiFridge.products.forEach(product => {
+            if (vsiSavedMap.has(product.name)) {
+              product.savedQuantity = vsiSavedMap.get(product.name);
+              product.currentQuantity = vsiSavedMap.get(product.name);
+              console.log(`  ✅ ВСІ: ${product.name} = ${product.savedQuantity}`);
+            }
+          });
+        }
+      }
+    }
+    
     console.log(`📊 Холодильників створено: ${grouped.length}`);
     grouped.forEach(fridge => {
       const filledCount = fridge.products.filter(p => p.savedQuantity && p.savedQuantity !== "").length;
@@ -1100,8 +1131,8 @@ function groupInventory(products) {
         category: item.category,
         type: item.type,
         unit: item.unit || "кг",
-        currentQuantity: item.quantity || "",
-        savedQuantity: item.quantity || "",
+        currentQuantity: "",  // ВСІ завжди порожній при створенні
+        savedQuantity: "",     // ВСІ завжди порожній при створенні
         rowIndex: item.rowIndex
       });
     }

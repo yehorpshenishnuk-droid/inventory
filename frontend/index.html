@@ -566,6 +566,7 @@
     
     let allFridges = [];
     let currentFridge = null;
+    let currentFridgeCode = null; // Зберігаємо originalCode поточного холодильника
     let inventoryData = {};
     let inventoryDate = null;
     let currentProducts = [];
@@ -584,6 +585,18 @@
       
       // Інакше - холодильник
       return '❄️';
+    }
+
+    // Тип для відображення (Холодильник/Стелаж)
+    function getFridgeType(fridgeName) {
+      // Якщо це "ВСІ"
+      if (fridgeName === 'ВСІ') return 'ВСІ';
+      
+      // Якщо назва містить "Стелаж"
+      if (String(fridgeName).includes('Стелаж')) return 'Стелаж';
+      
+      // Інакше - холодильник
+      return 'Холодильник';
     }
 
     // Перевірка авторизації
@@ -852,7 +865,8 @@
         if (isExistingInventory) {
           // Якщо існує інвентаризація за цю дату, завантажуємо збережені дані
           allFridges.forEach(fridge => {
-            inventoryData[fridge.fridgeNumber] = fridge.products.map(p => ({
+            const dataKey = fridge.originalCode || fridge.fridgeNumber;
+            inventoryData[dataKey] = fridge.products.map(p => ({
               name: p.name,
               quantity: p.savedQuantity || ""
             }));
@@ -928,8 +942,10 @@
         const card = document.createElement("div");
         card.className = "fridge-card";
         
-        const hasData = inventoryData[fridge.fridgeNumber] && 
-                        inventoryData[fridge.fridgeNumber].some(p => p.quantity !== "");
+        // Використовуємо originalCode для збережених даних
+        const dataKey = fridge.originalCode || fridge.fridgeNumber;
+        const hasData = inventoryData[dataKey] && 
+                        inventoryData[dataKey].some(p => p.quantity !== "");
         
         if (hasData) {
           card.classList.add("selected");
@@ -965,6 +981,9 @@
     // Показати продукти холодильника
     async function showProducts(fridge) {
       console.log("📂 Відкриваю холодильник:", fridge.fridgeNumber);
+      
+      // Визначаємо код для збереження і блокування
+      const fridgeCode = fridge.originalCode || fridge.fridgeNumber;
       
       // Блокуємо холодильник з retry (одразу, без перевірки)
       let lockResult = null;
@@ -1045,20 +1064,20 @@
             console.log("💾 Продукти зі збереженими даними:", productsWithData);
             
             if (productsWithData.length > 0) {
-              if (!inventoryData[fridge.fridgeNumber]) {
-                inventoryData[fridge.fridgeNumber] = [];
+              if (!inventoryData[fridgeCode]) {
+                inventoryData[fridgeCode] = [];
               }
               
               productsWithData.forEach(serverProduct => {
-                const existingIndex = inventoryData[fridge.fridgeNumber].findIndex(p => p.name === serverProduct.name);
+                const existingIndex = inventoryData[fridgeCode].findIndex(p => p.name === serverProduct.name);
                 
                 if (existingIndex >= 0) {
                   // Якщо вже є - оновлюємо
-                  inventoryData[fridge.fridgeNumber][existingIndex].quantity = serverProduct.savedQuantity;
+                  inventoryData[fridgeCode][existingIndex].quantity = serverProduct.savedQuantity;
                   console.log("♻️ Оновлено:", serverProduct.name, "=", serverProduct.savedQuantity);
                 } else {
                   // Додаємо новий
-                  inventoryData[fridge.fridgeNumber].push({
+                  inventoryData[fridgeCode].push({
                     name: serverProduct.name,
                     quantity: serverProduct.savedQuantity
                   });
@@ -1076,18 +1095,18 @@
       }
       
       currentFridge = fridge;
+      currentFridgeCode = fridgeCode; // Зберігаємо код для використання в інших функціях
       currentProducts = fridge.products;
       document.getElementById("fridge-selector").style.display = "none";
       document.getElementById("product-list").classList.add("active");
-      document.getElementById("current-fridge-title").textContent = 
-        `${getFridgeType(fridge.fridgeNumber)} ${fridge.fridgeNumber}`;
+      document.getElementById("current-fridge-title").textContent = fridge.fridgeNumber;
       
       document.getElementById("search-input").value = "";
       
       const container = document.getElementById("products-container");
       container.innerHTML = "";
       
-      const savedData = inventoryData[fridge.fridgeNumber] || [];
+      const savedData = inventoryData[fridgeCode] || [];
       
       console.log("📋 Відображаю продукти з даними:", savedData);
       
@@ -1272,7 +1291,7 @@
         });
       });
       
-      inventoryData[currentFridge.fridgeNumber] = products;
+      inventoryData[currentFridgeCode] = products;
       hasUnsavedChanges = false;
       saveDraft();
       
@@ -1307,7 +1326,7 @@
         });
       });
       
-      inventoryData[currentFridge.fridgeNumber] = products;
+      inventoryData[currentFridgeCode] = products;
       hasUnsavedChanges = false;
       saveDraft();
       
@@ -1322,8 +1341,8 @@
     async function saveToGoogleSheetsSync() {
       try {
         const fridgeArray = [{
-          fridgeNumber: currentFridge.fridgeNumber,
-          products: inventoryData[currentFridge.fridgeNumber]
+          fridgeNumber: currentFridgeCode, // Використовуємо код (X1, C4)
+          products: inventoryData[currentFridgeCode]
             .filter(p => p.quantity !== "")
             .map(p => ({
               name: p.name,
@@ -1376,7 +1395,7 @@
         });
       });
       
-      inventoryData[currentFridge.fridgeNumber] = products;
+      inventoryData[currentFridgeCode] = products;
       saveDraft();
       
       // Готуємо дані для відправки - тільки заповнені позиції
@@ -1449,7 +1468,7 @@
       unfilled.forEach(item => {
         const div = document.createElement("div");
         div.className = "unfilled-item";
-        div.textContent = `${getFridgeType(item.fridge)} ${item.fridge}: ${item.name}`;
+        div.textContent = `${item.fridge}: ${item.name}`;
         list.appendChild(div);
       });
       
@@ -1695,10 +1714,10 @@
     // Попередження перед виходом
     window.addEventListener("beforeunload", (e) => {
       // Розблокувати холодильник при закритті вкладки
-      if (currentFridge) {
+      if (currentFridge && currentFridgeCode) {
         // Використовуємо navigator.sendBeacon для надійного відправлення при закритті
         const data = JSON.stringify({});
-        fetch(`${API_URL}/api/locks/unlock/${currentFridge.fridgeNumber}`, {
+        fetch(`${API_URL}/api/locks/unlock/${currentFridgeCode}`, {
           method: "DELETE",
           keepalive: true // Важливо для роботи при закритті вкладки
         }).catch(() => {}); // Ігноруємо помилки

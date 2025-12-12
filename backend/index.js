@@ -1054,7 +1054,8 @@ app.get("/api/inventory/products", async (req, res) => {
     console.log(`📊 Холодильників створено: ${grouped.length}`);
     grouped.forEach(fridge => {
       const filledCount = fridge.products.filter(p => p.savedQuantity && p.savedQuantity !== "").length;
-      console.log(`  - ${fridge.fridgeNumber}: ${fridge.products.length} позицій (${filledCount} заповнених)`);
+      const code = fridge.originalCode || fridge.fridgeNumber;
+      console.log(`  - ${fridge.fridgeNumber} (${code}): ${fridge.products.length} позицій (${filledCount} заповнених)`);
     });
 
     res.json({
@@ -1111,11 +1112,11 @@ function groupInventory(products) {
     a.name.localeCompare(b.name, 'uk')
   );
 
-  // ✅ СОРТУЄМО холодильники: спочатку "ВСІ", потім по номеру
+  // ✅ СОРТУЄМО холодильники по номеру, "ВСІ" в кінці
   const sortedKeys = Object.keys(fridges).sort((a, b) => {
-    // "ВСІ" завжди першим
-    if (a === 'ВСІ') return -1;
-    if (b === 'ВСІ') return 1;
+    // "ВСІ" завжди останнім
+    if (a === 'ВСІ') return 1;
+    if (b === 'ВСІ') return -1;
     
     // Витягуємо числа з назв (X1, X2, C4, X10...)
     const numA = parseInt(a.replace(/[^\d]/g, '')) || 999;
@@ -1124,8 +1125,24 @@ function groupInventory(products) {
     return numA - numB;
   });
 
+  // Функція для форматування назви холодильника
+  function formatFridgeName(code) {
+    if (code === 'ВСІ') return 'ВСІ';
+    
+    const num = code.replace(/[^\d]/g, '');
+    
+    // Якщо починається з C або c - це стелаж
+    if (code.startsWith('C') || code.startsWith('c')) {
+      return `Стелаж ${num}`;
+    }
+    
+    // Інакше - холодильник
+    return `Холодильник ${num}`;
+  }
+
   return sortedKeys.map(loc => ({
-    fridgeNumber: loc,
+    fridgeNumber: formatFridgeName(loc),
+    originalCode: loc, // Зберігаємо оригінальний код для внутрішньої логіки
     products: fridges[loc]
   }));
 }
@@ -1181,18 +1198,19 @@ app.post("/api/inventory/save", async (req, res) => {
     const dataByFridge = {};
 
     inventoryData.forEach(fridge => {
-      const fridgeNum = fridge.fridgeNumber;
+      // Використовуємо оригінальний код (X1, C4) для збереження
+      const fridgeCode = fridge.originalCode || fridge.fridgeNumber;
       
       // Копіюємо існуючі дані для цього холодильника
-      if (existingData[fridgeNum]) {
-        dataByFridge[fridgeNum] = Object.values(existingData[fridgeNum]);
+      if (existingData[fridgeCode]) {
+        dataByFridge[fridgeCode] = Object.values(existingData[fridgeCode]);
       } else {
-        dataByFridge[fridgeNum] = [];
+        dataByFridge[fridgeCode] = [];
       }
       
       // Оновлюємо/додаємо нові дані
       fridge.products.forEach(item => {
-        const existingIndex = dataByFridge[fridgeNum].findIndex(p => p.name === item.name);
+        const existingIndex = dataByFridge[fridgeCode].findIndex(p => p.name === item.name);
         
         const productData = {
           name: item.name,
@@ -1204,12 +1222,12 @@ app.post("/api/inventory/save", async (req, res) => {
         
         if (existingIndex >= 0) {
           // Оновлюємо існуючий запис
-          dataByFridge[fridgeNum][existingIndex] = productData;
-          console.log(`♻️ Оновлено: ${fridgeNum} - ${item.name} = ${item.quantity}`);
+          dataByFridge[fridgeCode][existingIndex] = productData;
+          console.log(`♻️ Оновлено: ${fridge.fridgeNumber} - ${item.name} = ${item.quantity}`);
         } else {
           // Додаємо новий запис
-          dataByFridge[fridgeNum].push(productData);
-          console.log(`➕ Додано: ${fridgeNum} - ${item.name} = ${item.quantity}`);
+          dataByFridge[fridgeCode].push(productData);
+          console.log(`➕ Додано: ${fridge.fridgeNumber} - ${item.name} = ${item.quantity}`);
         }
       });
     });
